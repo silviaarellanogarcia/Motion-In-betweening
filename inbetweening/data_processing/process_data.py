@@ -1,72 +1,80 @@
-from typing import Any, Union, List, Optional
-
-from omegaconf import DictConfig
-
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 import pytorch_lightning as pl
+from inbetweening.data_processing.extract import get_lafan1_set
+
+class Lafan1Dataset(Dataset):
+    """LLFAN1 Dataset class."""
+
+    def __init__(self, data_dir, window=50, offset=20, train=True):
+        """
+        Args:
+            data_dir (string): Directory with the dataset.
+            window (int): Size of the sliding window
+            offset (int): Offset between windows (in timesteps)
+            train (boolean): Indicates if the dataset is for training or testing
+
+        Outputs:
+            X: local positions
+            Q: local quaternions
+            parents: list of parent indices defining the bone hierarchy
+            contacts_l: binary tensor of left-foot contacts of shape (Batchsize, Timesteps, 2)
+            contacts_r: binary tensor of right-foot contacts of shape (Batchsize, Timesteps, 2)
+        """
+
+        self.data_dir = data_dir
+        self.window = window
+        self.offset = offset
+
+        if train:
+            self.actors = ['subject1', 'subject2', 'subject3', 'subject4']
+        else:
+            self.actors = ['subject5']
+        
+        # Load the dataset using the existing get_lafan1_set function
+        self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = get_lafan1_set(self.data_dir, self.actors, self.window, self.offset)
+
+    def __len__(self):
+        return len(self.X) ## Returns the number of sequences.
 
 
-class BasePLDataModule(pl.LightningDataModule):
-    """
-    FROM LIGHTNING DOCUMENTATION
+    def __getitem__(self, idx):
+        ### TODO: TEST THIS
+        """
+        Args:
+            idx: Inddex of the sample to retrieve
+        """
+        X = self.X[idx]
+        Q = self.Q[idx]
+        parents = self.parents
+        contacts_l = self.contacts_l[self.index_map[idx][0] : self.index_map[idx][1]]
+        contacts_r = self.contacts_r[self.index_map[idx][0] : self.index_map[idx][1]]
 
-    A DataModule standardizes the training, val, test splits, data preparation and transforms.
-    The main advantage is consistent data splits, data preparation and transforms across models.
+        sample = {
+            'X': X,
+            'Q': Q,
+            'parents': parents,
+            'contacts_l': contacts_l,
+            'contacts_r': contacts_r
+        }
 
-    Example::
+        return sample
+    
+if __name__ == "__main__":
+    bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"  # Update this with the actual path
+    actors = ['Actor1', 'Actor2']  # Replace with actual actor names in your dataset
 
-        class MyDataModule(LightningDataModule):
-            def __init__(self):
-                super().__init__()
-            def prepare_data(self):
-                # download, split, etc...
-                # only called on 1 GPU/TPU in distributed
-            def setup(self):
-                # make assignments here (val/train/test split)
-                # called on every process in DDP
-            def train_dataloader(self):
-                train_split = Dataset(...)
-                return DataLoader(train_split)
-            def val_dataloader(self):
-                val_split = Dataset(...)
-                return DataLoader(val_split)
-            def test_dataloader(self):
-                test_split = Dataset(...)
-                return DataLoader(test_split)
+    # Initialize the dataset
+    dataset = Lafan1Dataset(bvh_path, window=50, offset=20, train=True)
 
-    A DataModule implements 5 key methods:
+    # Test by retrieving a sample from the dataset
+    sample_idx = 0  # Test with the first sample
 
-    * **prepare_data** (things to do on 1 GPU/TPU not on every GPU/TPU in distributed mode).
-    * **setup**  (things to do on every accelerator in distributed mode).
-    * **train_dataloader** the training dataloader.
-    * **val_dataloader** the val dataloader(s).
-    * **test_dataloader** the test dataloader(s).
+    sample = dataset[sample_idx]
 
-
-    This allows you to share a full dataset without explaining how to download,
-    split transform and process the data
-
-    """
-
-    def __init__(self, conf: DictConfig):
-        super().__init__()
-        self.conf = conf
-
-    def prepare_data(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def setup(self, stage: Optional[str] = None):
-        raise NotImplementedError
-
-    def train_dataloader(self, *args, **kwargs) -> DataLoader:
-        raise NotImplementedError
-
-    def val_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
-        raise NotImplementedError
-
-    def test_dataloader(self, *args, **kwargs) -> Union[DataLoader, List[DataLoader]]:
-        raise NotImplementedError
-
-    def transfer_batch_to_device(self, batch: Any, device: torch.device) -> Any:
-        raise NotImplementedError
+    # Print out details to check if the data is loaded correctly
+    print("Positions shape:", sample['X'].shape)
+    print("Rotations shape:", sample['Q'].shape)
+    print("Parents:", sample['parents'])
+    print("Left Foot Contacts shape:", sample['contacts_l'].shape)
+    print("Right Foot Contacts shape:", sample['contacts_r'].shape)

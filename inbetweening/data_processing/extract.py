@@ -2,7 +2,7 @@
 
 import re, os, ntpath
 import numpy as np
-from . import utils
+import inbetweening.data_processing.utils as utils
 
 channelmap = {
     'Xrotation': 'x',
@@ -175,7 +175,7 @@ def get_lafan1_set(bvh_path, actors, window=50, offset=20):
     :param bvh_path: Path to the dataset BVH files
     :param list: actor prefixes to use in set
     :param window: width  of the sliding windows (in timesteps)
-    :param offset: offset between windows (in timesteps)
+    :param offset: offset between windows (in timesteps) --> windows overlap a bit between each other
     :return: tuple:
         X: local positions
         Q: local quaternions
@@ -190,9 +190,11 @@ def get_lafan1_set(bvh_path, actors, window=50, offset=20):
     Q = []
     contacts_l = []
     contacts_r = []
+    index_map = []  # Stores the start and end index for each bvh file
 
     # Extract
     bvh_files = os.listdir(bvh_path)
+    global_idx = 0
 
     for file in bvh_files:
         if file.endswith('.bvh'):
@@ -205,33 +207,41 @@ def get_lafan1_set(bvh_path, actors, window=50, offset=20):
 
                 # Sliding windows
                 i = 0
+                start_idx = global_idx
+
                 while i+window < anim.pos.shape[0]:
-                    q, x = utils.quat_fk(anim.quats[i: i+window], anim.pos[i: i+window], anim.parents)
-                    # Extract contacts
+                    q, x = utils.quat_fk(anim.quats[i: i+window], anim.pos[i: i+window], anim.parents) ## Returns the orientation and global positions
+                    # Extract contacts --> c_l and c_r are 2Dd arrays because the contact is evaluated at 2 different joints (ex. foot and heel)
+                    # TODO: ASK AND CHECK IF I UNDERSTANC THE EXTRACT_FEET_CONTACTS FUNCTION
                     c_l, c_r = utils.extract_feet_contacts(x, [3, 4], [7, 8], velfactor=0.02)
                     X.append(anim.pos[i: i+window])
                     Q.append(anim.quats[i: i+window])
                     seq_names.append(seq_name)
-                    subjects.append(subjects)
+                    subjects.append(subject)
                     contacts_l.append(c_l)
                     contacts_r.append(c_r)
 
                     i += offset
+                    global_idx += 1
+
+                end_idx = global_idx  # Store the end index for this file
+                index_map.append((start_idx, end_idx - 1, file))  # Store the range of indices and the file name
 
     X = np.asarray(X)
     Q = np.asarray(Q)
     contacts_l = np.asarray(contacts_l)
     contacts_r = np.asarray(contacts_r)
 
-    # Sequences around XZ = 0
+    # Sequences around XZ = 0 --> Center the sequences around the XZ plane
     xzs = np.mean(X[:, :, 0, ::2], axis=1, keepdims=True)
     X[:, :, 0, 0] = X[:, :, 0, 0] - xzs[..., 0]
     X[:, :, 0, 2] = X[:, :, 0, 2] - xzs[..., 1]
 
-    # Unify facing on last seed frame
+    # Unify facing on last seed frame --> We always want to have the first pose facing "us", so we change all the other poses accordding to this.
+    # Shape (n_sequences, window_size, n_joints, n_dimensions) --> n_dimensions is always 3, x, y, z ## TODO: ASK WHAT IS THE 702 AND HOW IT IS COMPUTED. MY GUESS: NUMBER OF SEQUENCES OF 50 FRAMES
     X, Q = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
 
-    return X, Q, anim.parents, contacts_l, contacts_r
+    return X, Q, anim.parents, contacts_l, contacts_r, index_map
 
 
 def get_train_stats(bvh_folder, train_set):
@@ -254,3 +264,9 @@ def get_train_stats(bvh_folder, train_set):
     x_std = np.std(x_glbl.reshape([x_glbl.shape[0], x_glbl.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
 
     return x_mean, x_std, offsets
+
+if __name__ == "__main__":
+    bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"
+    actors = ['subject5']
+    X, Q, parents, contacts_l, contacts_r = get_lafan1_set(bvh_path, actors, window=50, offset=20)
+    print(X)
