@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 from inbetweening.data_processing.extract import get_lafan1_set
 
 class Lafan1Dataset(Dataset):
-    """LLFAN1 Dataset class."""
+    """LAFAN1 Dataset class."""
 
     def __init__(self, data_dir, window=50, offset=20, train=True):
         """
