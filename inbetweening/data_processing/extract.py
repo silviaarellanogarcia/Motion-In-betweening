@@ -212,7 +212,6 @@ def get_lafan1_set(bvh_path, actors, window=50, offset=20):
                 while i+window < anim.pos.shape[0]:
                     q, x = utils.quat_fk(anim.quats[i: i+window], anim.pos[i: i+window], anim.parents) ## Returns the orientation and global positions
                     # Extract contacts --> c_l and c_r are 2Dd arrays because the contact is evaluated at 2 different joints (ex. foot and heel)
-                    # TODO: ASK AND CHECK IF I UNDERSTANC THE EXTRACT_FEET_CONTACTS FUNCTION
                     c_l, c_r = utils.extract_feet_contacts(x, [3, 4], [7, 8], velfactor=0.02)
                     X.append(anim.pos[i: i+window])
                     Q.append(anim.quats[i: i+window])
@@ -238,7 +237,7 @@ def get_lafan1_set(bvh_path, actors, window=50, offset=20):
     X[:, :, 0, 2] = X[:, :, 0, 2] - xzs[..., 1]
 
     # Unify facing on last seed frame --> We always want to have the first pose facing "us", so we change all the other poses accordding to this.
-    # Shape (n_sequences, window_size, n_joints, n_dimensions) --> n_dimensions is always 3, x, y, z ## TODO: ASK WHAT IS THE 702 AND HOW IT IS COMPUTED. MY GUESS: NUMBER OF SEQUENCES OF 50 FRAMES
+    # Shape (n_sequences, window_size, n_joints, n_dimensions) --> n_dimensions is always 3, x, y, z
     X, Q = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
 
     return X, Q, anim.parents, contacts_l, contacts_r, index_map

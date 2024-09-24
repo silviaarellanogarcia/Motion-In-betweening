@@ -1,6 +1,7 @@
 /users/
 /data/
 /inbetweening/data_processing/__pycache__/
+/inbetweening/utils/__pycache__/
 .DS_Store
 .vscode/
 package.egg-info
