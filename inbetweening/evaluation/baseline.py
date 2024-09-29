@@ -5,35 +5,27 @@ from scipy.spatial.transform import Slerp
 
 from inbetweening.utils.convert_to_bvh import write_bvh
 
-# I THINK IT'S NOT NECESSARY, SINCE THE BVH CONTAINS THE CHANGES IN THE ANGLES BETWEEN FRAMES, NOT BETWEEN POSITIONS!!!! --> CHECK
-# def interpolate_position(past_context_seq, target_sample, num_gap_frames):
-#     len_past_seq = len(past_context_seq)
-#     idx_frame_to_generate = len_past_seq + 1 ## This index starts with 1 to be able to compute the weights correctly
-#     idx_target = len_past_seq + num_gap_frames + 1
-#     new_seq = []
-#     new_pos = np.zeros((past_context_seq.shape[1], past_context_seq.shape[2]))
 
+def interpolate_position(past_context_seq, target_sample, num_gap_frames):
+    last_position = past_context_seq[-1]
 
-#     for frame in range(1, num_gap_frames):
-#         normalizing_factor = 0
-#         # First interpolate the position
-#         for i in range(past_context_seq.shape[0]):
-#             weight = 1 - (idx_frame_to_generate - i)/idx_target
-#             normalizing_factor += weight
-#             new_pos += weight * past_context_seq[i - 1] # Put ['X'] if I'm passing the whole seq and not only the pos
+    # Initialize an array to hold the new interpolated positions
+    new_seq = np.zeros((num_gap_frames, last_position.shape[0], last_position.shape[1]))
+
+    for frame in range(num_gap_frames):
+        # Calculate the interpolation factor
+        alpha = frame / (num_gap_frames + 1)  # Normalized factor between 0 and 1
         
-#         weight = 1 - (idx_target - idx_frame_to_generate)/idx_target
-#         normalizing_factor += weight
-#         new_pos += weight * target_sample
-#         new_pos /= normalizing_factor
+        # Linearly interpolate between the last position and the target sample
+        new_pos = (1 - alpha) * last_position + alpha * target_sample
+        
+        # Store the new position in the new sequence
+        new_seq[frame] = new_pos
 
-#         new_seq.append(new_pos)
-    
-#     new_seq = np.array(new_seq)
-#     # Concatenate past_context_seq, new_seq, and target_sample
-#     final_seq = np.concatenate((past_context_seq, new_seq, target_sample[np.newaxis, :]), axis=0)
+    # Concatenate past_context_seq, new_seq, and target_sample
+    final_seq = np.concatenate((past_context_seq, new_seq, target_sample[np.newaxis, :]), axis=0)
 
-#     return final_seq
+    return final_seq
 
 
 def interpolate_quaternions(Q, start_frame, target_frame, num_gap_frames):
@@ -69,13 +61,14 @@ if __name__ == "__main__":
     # Test by retrieving a sample from the dataset
     sample_idx = 0  # Test with the first sample
     sample = dataset[sample_idx]
+    
+    # write_bvh('output.bvh', sample['X'], sample['Q'], sample['parents'])
 
     past_context_seq = sample['X'][:10, :, :]
-    target_sample = sample['X'][14, :, :]
+    target_sample = sample['X'][15, :, :]
     num_gap_frames = 5
 
-    #interpolated_X = interpolate_position(past_context_seq, target_sample, num_gap_frames) ## NOT NECESSARY --> REMOVE
+    interpolated_X = interpolate_position(past_context_seq, target_sample, num_gap_frames)
     interpolated_Q = interpolate_quaternions(sample['Q'], 9, 15, 5)
 
-    #write_bvh('output.bvh', sample['X'], sample['Q'], sample['parents'])
-    write_bvh('output2.bvh', sample['X'], interpolated_Q, sample['parents'])
+    write_bvh('output5.bvh', interpolated_X, interpolated_Q[:16, :, :], sample['parents'])
