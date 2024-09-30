@@ -167,6 +167,74 @@ def read_bvh(filename, start=None, end=None, order=None):
 
     return Anim(rotations, positions, offsets, parents, names)
 
+def bvh_to_item(bvh_path, window=50, offset=20):
+    """
+    Extract the same test set as in the article, given the location of the BVH files.
+
+    :param bvh_path: Path to the dataset BVH files
+    :param list: actor prefixes to use in set
+    :param window: width  of the sliding windows (in timesteps)
+    :param offset: offset between windows (in timesteps) --> windows overlap a bit between each other
+    :return: tuple:
+        X: local positions
+        Q: local quaternions
+        parents: list of parent indices defining the bone hierarchy
+        contacts_l: binary tensor of left-foot contacts of shape (Batchsize, Timesteps, 2)
+        contacts_r: binary tensor of right-foot contacts of shape (Batchsize, Timesteps, 2)
+    """
+    npast = 10
+    seq_names = []
+    X = []
+    Q = []
+    contacts_l = []
+    contacts_r = []
+    index_map = []  # Stores the start and end index for each bvh file
+
+    # Extract
+    global_idx = 0
+
+    if bvh_path.endswith('.bvh'):
+        seq_name = ntpath.basename(bvh_path[:-4])
+
+        print('Processing file {}'.format(os.path.basename(bvh_path)))
+        anim = read_bvh(bvh_path)
+
+        # Sliding windows
+        i = 0
+        start_idx = global_idx
+
+        while i+window < anim.pos.shape[0]:
+            q, x = utils.quat_fk(anim.quats[i: i+window], anim.pos[i: i+window], anim.parents) ## Returns the orientation and global positions
+            # Extract contacts --> c_l and c_r are 2Dd arrays because the contact is evaluated at 2 different joints (ex. foot and heel)
+            c_l, c_r = utils.extract_feet_contacts(x, [3, 4], [7, 8], velfactor=0.02)
+            X.append(anim.pos[i: i+window])
+            Q.append(anim.quats[i: i+window])
+            seq_names.append(seq_name)
+            contacts_l.append(c_l)
+            contacts_r.append(c_r)
+
+            i += offset
+            global_idx += 1
+
+        end_idx = global_idx  # Store the end index for this file
+        index_map.append((start_idx, end_idx - 1, os.path.basename(bvh_path)))  # Store the range of indices and the file name
+
+    X = np.asarray(X)
+    Q = np.asarray(Q)
+    contacts_l = np.asarray(contacts_l)
+    contacts_r = np.asarray(contacts_r)
+
+    # Sequences around XZ = 0 --> Center the sequences around the XZ plane
+    xzs = np.mean(X[:, :, 0, ::2], axis=1, keepdims=True)
+    X[:, :, 0, 0] = X[:, :, 0, 0] - xzs[..., 0]
+    X[:, :, 0, 2] = X[:, :, 0, 2] - xzs[..., 1]
+
+    # Unify facing on last seed frame --> We always want to have the first pose facing "us", so we change all the other poses accordding to this.
+    # Shape (n_sequences, window_size, n_joints, n_dimensions) --> n_dimensions is always 3, x, y, z
+    X, Q = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
+
+    return X, Q, anim.parents, contacts_l, contacts_r, index_map
+
 
 def get_lafan1_set(bvh_path, actors, window=50, offset=20):
     """
@@ -266,6 +334,6 @@ def get_train_stats(bvh_folder, train_set):
 
 if __name__ == "__main__":
     bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"
-    actors = ['subject5']
-    X, Q, parents, contacts_l, contacts_r = get_lafan1_set(bvh_path, actors, window=50, offset=20)
+    actors = ['subject4']
+    X, Q, parents, contacts_l, contacts_r, index_map = get_lafan1_set(bvh_path, actors, window=50, offset=20)
     print(X)

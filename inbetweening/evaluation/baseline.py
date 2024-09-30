@@ -55,7 +55,7 @@ def interpolate_quaternions(Q, start_frame, target_frame, num_gap_frames):
 
 
 if __name__ == "__main__":
-    bvh_path = bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"  # Update this with the actual path
+    bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"  # Update this with the actual path
     dataset = Lafan1Dataset(bvh_path, window=50, offset=20, train=True)
 
     # Test by retrieving a sample from the dataset
