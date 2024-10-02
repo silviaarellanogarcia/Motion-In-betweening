@@ -11,16 +11,17 @@ def interpolate_position(past_context_seq, target_sample, num_gap_frames):
 
     # Initialize an array to hold the new interpolated positions
     new_seq = np.zeros((num_gap_frames, last_position.shape[0], last_position.shape[1]))
+    new_seq[:, 1:, :] = last_position[1:, :] ## Set all the offsets. Now, only the hip movements are missing
 
     for frame in range(num_gap_frames):
         # Calculate the interpolation factor
-        alpha = frame / (num_gap_frames + 1)  # Normalized factor between 0 and 1
+        alpha = (frame + 1) / (num_gap_frames + 1)  # Normalized factor between 0 and 1
         
         # Linearly interpolate between the last position and the target sample
-        new_pos = (1 - alpha) * last_position + alpha * target_sample
+        new_pos = (1 - alpha) * last_position[0, :] + alpha * target_sample[0, :]
         
         # Store the new position in the new sequence
-        new_seq[frame] = new_pos
+        new_seq[frame, 0] = new_pos
 
     # Concatenate past_context_seq, new_seq, and target_sample
     final_seq = np.concatenate((past_context_seq, new_seq, target_sample[np.newaxis, :]), axis=0)
@@ -62,7 +63,7 @@ if __name__ == "__main__":
     sample_idx = 0  # Test with the first sample
     sample = dataset[sample_idx]
     
-    # write_bvh('output.bvh', sample['X'], sample['Q'], sample['parents'])
+    write_bvh('output_walk_gt2.bvh', sample['X'], sample['Q'], sample['parents'])
 
     past_context_seq = sample['X'][:10, :, :]
     target_sample = sample['X'][15, :, :]
@@ -71,4 +72,4 @@ if __name__ == "__main__":
     interpolated_X = interpolate_position(past_context_seq, target_sample, num_gap_frames)
     interpolated_Q = interpolate_quaternions(sample['Q'], 9, 15, 5)
 
-    write_bvh('output5.bvh', interpolated_X, interpolated_Q[:16, :, :], sample['parents'])
+    write_bvh('output_walk_int2.bvh', interpolated_X, interpolated_Q[:16, :, :], sample['parents'])

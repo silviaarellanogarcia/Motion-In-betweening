@@ -186,6 +186,8 @@ def bvh_to_item(bvh_path, window=50, offset=20):
     seq_names = []
     X = []
     Q = []
+    X_global = []
+    Q_global = []
     contacts_l = []
     contacts_r = []
     index_map = []  # Stores the start and end index for each bvh file
@@ -209,6 +211,8 @@ def bvh_to_item(bvh_path, window=50, offset=20):
             c_l, c_r = utils.extract_feet_contacts(x, [3, 4], [7, 8], velfactor=0.02)
             X.append(anim.pos[i: i+window])
             Q.append(anim.quats[i: i+window])
+            X_global.append(q)
+            Q_global.append(x)
             seq_names.append(seq_name)
             contacts_l.append(c_l)
             contacts_r.append(c_r)
@@ -221,6 +225,8 @@ def bvh_to_item(bvh_path, window=50, offset=20):
 
     X = np.asarray(X)
     Q = np.asarray(Q)
+    X_global = np.asarray(X_global)
+    Q_global = np.asarray(Q_global)
     contacts_l = np.asarray(contacts_l)
     contacts_r = np.asarray(contacts_r)
 
@@ -233,7 +239,7 @@ def bvh_to_item(bvh_path, window=50, offset=20):
     # Shape (n_sequences, window_size, n_joints, n_dimensions) --> n_dimensions is always 3, x, y, z
     X, Q = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
 
-    return X, Q, anim.parents, contacts_l, contacts_r, index_map
+    return X, Q, X_global, Q_global, anim.parents, contacts_l, contacts_r, index_map
 
 
 def get_lafan1_set(bvh_path, actors, window=50, offset=20):
@@ -317,7 +323,7 @@ def get_train_stats(bvh_folder, train_set):
     :return: Tuple of (local position mean vector, local position standard deviation vector, local joint offsets tensor)
     """
     print('Building the train set...')
-    xtrain, qtrain, parents, _, _ = get_lafan1_set(bvh_folder, train_set, window=50, offset=20)
+    xtrain, qtrain, parents, _, _, _ = get_lafan1_set(bvh_folder, train_set, window=50, offset=20)
 
     print('Computing stats...\n')
     # Joint offsets : are constant, so just take the first frame:
@@ -334,6 +340,11 @@ def get_train_stats(bvh_folder, train_set):
 
 if __name__ == "__main__":
     bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"
-    actors = ['subject4']
+    actors = ['subject1', 'subject2', 'subject3', 'subject4']
     X, Q, parents, contacts_l, contacts_r, index_map = get_lafan1_set(bvh_path, actors, window=50, offset=20)
     print(X)
+
+    x_mean, x_std, _ = get_train_stats(bvh_path, actors)
+    # np.save('mean_train.npy', x_mean)
+    # np.save('std_train.npy', x_std)
+    print(x_std)
