@@ -47,15 +47,15 @@ class Lafan1Dataset(Dataset):
         X = self.X[idx]
         Q = self.Q[idx]
         parents = self.parents
-        contacts_l = self.contacts_l[self.index_map[idx][0] : self.index_map[idx][1]]
-        contacts_r = self.contacts_r[self.index_map[idx][0] : self.index_map[idx][1]]
+        contacts_l = self.contacts_l[idx]
+        contacts_r = self.contacts_r[idx]
 
         sample = {
-            'X': X,
-            'Q': Q,
-            'parents': parents,
-            'contacts_l': contacts_l,
-            'contacts_r': contacts_r
+            'X': torch.tensor(X, dtype=torch.float32),
+            'Q': torch.tensor(Q, dtype=torch.float32),
+            'parents': torch.tensor(parents, dtype=torch.int64),
+            'contacts_l': torch.tensor(contacts_l, dtype=torch.bool),
+            'contacts_r': torch.tensor(contacts_r, dtype=torch.bool)
         }
 
         return sample
