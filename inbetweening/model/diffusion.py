@@ -107,17 +107,21 @@ class DiffusionModel(pl.LightningModule):
         noisy_X_0, noisy_Q_0, noise_X, noise_Q = self.forward_diffusion_sample(X_0, Q_0, t)
         
         # Predict noise for both positional and quaternion data
-        noise_pred_Q = model(noisy_Q_0, t)
+        noise_pred = model(noisy_X_0, noisy_Q_0, t)
 
         # Reshape the noise so that it has the same structure as the noise prediction.
+        batch_size, frames, joints, quaternion_dims = noise_X.shape
+        noise_X = noise_X.view(batch_size, quaternion_dims, frames * joints)
         batch_size, frames, joints, quaternion_dims = noise_Q.shape
         noise_Q = noise_Q.view(batch_size, quaternion_dims, frames * joints)
+
+        # Concatenate the channels dimensions to consider X and Q at the same time
+        noise_X_and_Q = torch.cat((noise_X, noise_Q), dim=1)
         
         # Calculate the loss (you can change L1 to MSE if needed)
-        #loss_X = F.l1_loss(noise_X, noise_pred_X)
-        loss_Q = F.l1_loss(noise_Q, noise_pred_Q)
+        loss_X_and_Q = F.l1_loss(noise_X_and_Q, noise_pred)
 
-        total_loss = loss_Q
+        total_loss = loss_X_and_Q
         
         return total_loss
     
@@ -149,6 +153,6 @@ if __name__ == "__main__":
     # Get beta scheduler
     betas = get_scheduler('linear', n_diffusion_timesteps, beta_start, beta_end)
 
-    model = DiffusionModel(betas, lr=0.001)
+    model = DiffusionModel(betas, lr=0.001, device='cpu')
     trainer = pl.Trainer(max_epochs=150, precision="bf16-mixed") ### TODO: ASK IF BF16-MIXER IS OKAY.
     trainer.fit(model)

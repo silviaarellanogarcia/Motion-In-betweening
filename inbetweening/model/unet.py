@@ -56,7 +56,7 @@ class SimpleUnet(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        Q_channels = 4 # Is both the input and output dimension ## TODO: 3 if position, 4 if angles.
+        Q_channels = 4 + 3 # Is both the input and output dimension # 4 quaternion dimensions + 3 position dimensions
         down_channels = (64, 128, 256, 512, 1024) # Left part of the UNet
         up_channels = (1024, 512, 256, 128, 64) # Right part of the UNet
         time_emb_dim = 64 ## TODO: CHECK! I think it should be higher than the number of frames in a window.
@@ -78,32 +78,37 @@ class SimpleUnet(nn.Module):
         
         self.output = nn.Conv1d(up_channels[-1], Q_channels, 1)
 
-    def forward(self, Q, timestep):
+    def forward(self, X, Q, timestep):
         # Embed time
         t = self.time_mlp(timestep)
 
+        batch_size, frames, joints, quaternion_dims = X.shape
+        X = X.view(batch_size, quaternion_dims, frames * joints)
         batch_size, frames, joints, quaternion_dims = Q.shape
         Q = Q.view(batch_size, quaternion_dims, frames * joints) 
 
+        # Concatenate the channels dimensions to be able to pass to the network X and Q at the same time
+        X_and_Q = torch.cat((X, Q), dim=1)
+
         # Initial conv
-        Q = self.conv0(Q.float())
+        X_and_Q = self.conv0(X_and_Q.float())
         # Unet
         residual_inputs = []
         for down in self.downs:
-            Q = down(Q, t)
-            residual_inputs.append(Q)
+            X_and_Q = down(X_and_Q, t)
+            residual_inputs.append(X_and_Q)
         for up in self.ups:
-            residual_Q = residual_inputs.pop()
+            residual_X_and_Q = residual_inputs.pop()
 
-            if residual_Q.shape[2] > Q.shape[2]:
+            if residual_X_and_Q.shape[2] > X_and_Q.shape[2]:
                 # Pad Q to match the shape of residual_Q and allow concatenation
-                pad_amount = (0, residual_Q.shape[2] - Q.shape[2]) # No padding on the left side, just the right.
-                Q = F.pad(Q, pad_amount)
+                pad_amount = (0, residual_X_and_Q.shape[2] - X_and_Q.shape[2]) # No padding on the left side, just the right.
+                X_and_Q = F.pad(X_and_Q, pad_amount)
 
             # Add residual x as additional channels
-            Q = torch.cat((Q, residual_Q), dim=1)           
-            Q = up(Q, t)
-        return self.output(Q)
+            X_and_Q = torch.cat((X_and_Q, residual_X_and_Q), dim=1)           
+            X_and_Q = up(X_and_Q, t)
+        return self.output(X_and_Q)
 
 if __name__ == '__main__':
     model = SimpleUnet()
