@@ -5,3 +5,4 @@ __pycache__/
 .vscode/
 package.egg-info
 lightning_logs/
+inbetweening/model/pickle_data

@@ -1,3 +1,5 @@
+import pickle
+import os
 import torch
 from torch.utils.data import DataLoader, Dataset
 import pytorch_lightning as pl
@@ -6,7 +8,7 @@ from inbetweening.data_processing.extract import get_lafan1_set
 class Lafan1Dataset(Dataset):
     """LAFAN1 Dataset class."""
 
-    def __init__(self, data_dir, window=50, offset=20, train=True):
+    def __init__(self, data_dir, window=50, offset=20, train=True, val=False):
         """
         Args:
             data_dir (string): Directory with the dataset.
@@ -27,12 +29,30 @@ class Lafan1Dataset(Dataset):
         self.offset = offset
 
         if train:
-            self.actors = ['subject1', 'subject2', 'subject3', 'subject4']
+            self.actors = ['subject1', 'subject2', 'subject3']
+            act_num = '123'
+        elif val:
+            self.actors = ['subject4'] ## TODO: This could be modified. Check if the amount of data of subject 4 is enough.
+            act_num = '4'
         else:
             self.actors = ['subject5']
+            act_num = '5'
         
-        # Load the dataset using the existing get_lafan1_set function
-        self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = get_lafan1_set(self.data_dir, self.actors, self.window, self.offset)
+
+        filename = './pickle_data/lafan1_data_actors_' + act_num + '_win_' + str(self.window) + '_off_' + str(self.offset) + '.pkl'
+
+        if os.path.isfile(filename):
+            with open(filename, 'rb') as f:
+                self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = pickle.load(f)
+                print('Dataset loaded! (', filename, ')')
+        else:
+            # Load the dataset using the existing get_lafan1_set function
+            self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = get_lafan1_set(self.data_dir, self.actors, self.window, self.offset)
+
+            # with open(filename, 'wb') as f:
+            with open('/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/Motion-In-betweening/inbetweening/model/pickle_data/lafan1_data_actors_123_win_50_off_20.pkl', 'wb') as f:
+                pickle.dump((self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map), f)
+                print('Dataset saved as ', filename)
 
     def __len__(self):
         return len(self.X) ## Returns the number of sequences.
@@ -42,7 +62,7 @@ class Lafan1Dataset(Dataset):
         ### TODO: TEST THIS
         """
         Args:
-            idx: Inddex of the sample to retrieve
+            idx: Index of the sample to retrieve
         """
         X = self.X[idx]
         Q = self.Q[idx]
