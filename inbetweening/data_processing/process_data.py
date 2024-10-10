@@ -8,7 +8,7 @@ from inbetweening.data_processing.extract import get_lafan1_set
 class Lafan1Dataset(Dataset):
     """LAFAN1 Dataset class."""
 
-    def __init__(self, data_dir, window=50, offset=20, train=True, val=False):
+    def __init__(self, data_dir: str, window: int, offset: int, train: bool=True, val: bool=False):
         """
         Args:
             data_dir (string): Directory with the dataset.
@@ -50,7 +50,7 @@ class Lafan1Dataset(Dataset):
             self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = get_lafan1_set(self.data_dir, self.actors, self.window, self.offset)
 
             # with open(filename, 'wb') as f:
-            with open('/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/Motion-In-betweening/inbetweening/model/pickle_data/lafan1_data_actors_123_win_50_off_20.pkl', 'wb') as f:
+            with open(filename, 'wb') as f:
                 pickle.dump((self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map), f)
                 print('Dataset saved as ', filename)
 
@@ -59,7 +59,6 @@ class Lafan1Dataset(Dataset):
 
 
     def __getitem__(self, idx):
-        ### TODO: TEST THIS
         """
         Args:
             idx: Index of the sample to retrieve
@@ -79,6 +78,59 @@ class Lafan1Dataset(Dataset):
         }
 
         return sample
+    
+    
+class Lafan1DataModule(pl.LightningDataModule):
+    def __init__(self, data_dir: str, batch_size: int, window: int, offset: int):
+        """
+        Args:
+            data_dir (string): Directory with the dataset.
+            window (int): Size of the sliding window
+            offset (int): Offset between windows (in timesteps)
+        """
+        super().__init__()  # Call the parent class's initializer
+        self.data_dir = data_dir
+        self.window = window
+        self.offset = offset
+        self.batch_size = batch_size
+
+        # Initialize datasets
+        self.train_dataset = None
+        self.val_dataset = None
+        self.test_dataset = None
+
+    def train_dataloader(self):
+        loader = torch.utils.data.DataLoader(
+            dataset=self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True
+        )
+        return loader
+
+    def val_dataloader(self):
+        loader = torch.utils.data.DataLoader(
+            dataset=self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False
+        )
+        return loader
+
+    def test_dataloader(self):
+        loader = torch.utils.data.DataLoader(
+            dataset=self.test_dataset,
+            batch_size=1,
+            shuffle=False
+        )
+        return loader
+
+
+    def setup(self, stage=None):
+        if stage == 'fit' or stage is None:
+            self.train_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=True, val=False)
+            self.val_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=True)
+
+        elif stage == 'test':
+            self.test_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=False)
     
 if __name__ == "__main__":
     bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"  # Update this with the actual path

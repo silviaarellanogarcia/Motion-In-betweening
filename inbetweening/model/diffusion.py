@@ -2,13 +2,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import pytorch_lightning as pl
+import yaml
 
-from inbetweening.data_processing.process_data import Lafan1Dataset
+from inbetweening.data_processing.process_data import Lafan1DataModule, Lafan1Dataset
 from inbetweening.model.unet import SimpleUnet
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.cli import LightningCLI
 
-def get_scheduler(schedule_name, n_diffusion_timesteps, beta_start=0.0001, beta_end=0.02):
+def get_scheduler(schedule_name, n_diffusion_timesteps, beta_start, beta_end):
     """
     Define a noise scheduler
     """
@@ -31,10 +32,13 @@ def get_index_from_list(vals, t, x_shape):
 
 
 class DiffusionModel(pl.LightningModule):
-    def __init__(self, betas, lr):
+    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr:float):
         super().__init__() # Initialize the parent's class before initializing any child
+
+        # Get beta scheduler
+        betas = get_scheduler('linear', n_diffusion_timesteps, beta_start, beta_end)
         self.betas = betas
-        self.n_diffusion_timesteps = self.betas.shape[0]
+        self.n_diffusion_timesteps = n_diffusion_timesteps
         
         alphas = 1.0 - self.betas
         self.alphas_cumprod = torch.cumprod(alphas, axis=0) # Cumprod stands for cumulative product. It tells us how much info remains.
@@ -44,40 +48,7 @@ class DiffusionModel(pl.LightningModule):
 
         self.model = SimpleUnet()
         self.lr = lr
-        self.batch_size = 1
-
-        self.bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data2" ## TODO: Generalize later
-        self.window = 50
-        self.offset = 20
     
-    def train_dataloader(self):
-        dataset = Lafan1Dataset(self.bvh_path, window=self.window, offset=self.offset, train=True, val=False)
-
-        ### TODO: Save dataset
-        loader = torch.utils.data.DataLoader(
-            dataset=dataset,
-            batch_size=self.batch_size,
-            shuffle=True
-        )
-        return loader
-
-    def val_dataloader(self):
-        dataset = Lafan1Dataset(self.bvh_path, window=self.window, offset=self.offset, train=False, val=True)
-        loader = torch.utils.data.DataLoader(
-            dataset=dataset,
-            batch_size=self.batch_size,
-            shuffle=True
-        )
-        return loader
-
-    def test_dataloader(self):
-        dataset = dataset = Lafan1Dataset(self.bvh_path, window=self.window, offset=self.offset, train=False, val=False)
-        loader = torch.utils.data.DataLoader(
-            dataset=dataset,
-            batch_size=1,
-            shuffle=False
-        )
-        return loader
 
     def forward_diffusion_sample(self, X_0, Q_0, t):
         """ 
@@ -139,11 +110,46 @@ class DiffusionModel(pl.LightningModule):
         total_loss = loss_X + loss_Q
         
         # Log loss
-        self.log('train_loss_X', loss_X)
-        self.log('train_loss_Q', loss_Q)
-        self.log('train_total_loss', total_loss)
+        self.log('train_loss_X', loss_X, prog_bar=True)
+        self.log('train_loss_Q', loss_Q, prog_bar=True)
+        self.log('train_total_loss', total_loss, prog_bar=True)
 
         return total_loss
+    
+    def validation_step(self, batch, batch_idx):
+        # Batch processing
+        X_0 = batch['X']
+        Q_0 = batch['Q']
+        t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
+
+        # Calculate loss
+        loss_X, loss_Q = self.get_loss(self.model, X_0, Q_0, t)
+        total_loss = loss_X + loss_Q
+        
+        # Log loss
+        self.log('validation_loss_X', loss_X, prog_bar=True)
+        self.log('validation_loss_Q', loss_Q, prog_bar=True)
+        self.log('validation_total_loss', total_loss, prog_bar=True)
+
+        return total_loss
+    
+    def test_step(self, batch, batch_idx):
+        # Batch processing
+        X_0 = batch['X']
+        Q_0 = batch['Q']
+        t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
+
+        # Calculate loss
+        loss_X, loss_Q = self.get_loss(self.model, X_0, Q_0, t)
+        total_loss = loss_X + loss_Q
+        
+        # Log loss
+        self.log('test_loss_X', loss_X, prog_bar=True)
+        self.log('test_loss_Q', loss_Q, prog_bar=True)
+        self.log('test_total_loss', total_loss, prog_bar=True)
+
+        return total_loss
+
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
@@ -152,14 +158,15 @@ class DiffusionModel(pl.LightningModule):
 
 
 if __name__ == "__main__":
-    beta_start = 0.0001
-    beta_end = 0.02
-    n_diffusion_timesteps = 300
+    # beta_start = 0.0001
+    # beta_end = 0.02
+    # n_diffusion_timesteps = 300
 
-    # Get beta scheduler
-    betas = get_scheduler('linear', n_diffusion_timesteps, beta_start, beta_end)
+    # model = DiffusionModel(beta_start, beta_end, n_diffusion_timesteps, lr=0.001)
+    # tb_logger = pl_loggers.TensorBoardLogger('logs/')
+    # trainer = pl.Trainer(max_epochs=150, precision="bf16-mixed", logger=tb_logger) #### TODO: LOOK!
+    # trainer.fit(model)
 
-    model = DiffusionModel(betas, lr=0.001)
-    tb_logger = pl_loggers.TensorBoardLogger('logs/')
-    trainer = pl.Trainer(max_epochs=150, precision="bf16-mixed", logger=tb_logger) #### TODO: LOOK!
-    trainer.fit(model)
+    LightningCLI(DiffusionModel, Lafan1DataModule)
+
+    ## COMMAND: python diffusion.py fit --config ./default_config.yaml

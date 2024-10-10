@@ -1,0 +1,15 @@
+trainer:
+  max_epochs: 150
+  precision: bf16-mixed  # TODO: LOOK!! Potential source of error
+
+model:
+  lr: 0.001 
+  beta_start: 0.0001 
+  beta_end: 0.02
+  n_diffusion_timesteps: 300
+
+data:
+  data_dir: /Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data2
+  batch_size: 2
+  window: 50
+  offset: 20
