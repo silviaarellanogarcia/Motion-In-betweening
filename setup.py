@@ -1,3 +1,3 @@
 from setuptools import setup, find_packages
 
-setup(name='package', packages=find_packages(), zip_safe=False)
+setup(name='inbetweening', packages=find_packages(), zip_safe=False)

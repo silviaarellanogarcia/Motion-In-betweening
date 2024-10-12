@@ -124,7 +124,7 @@ class DiffusionModel(pl.LightningModule):
 
         # Calculate loss
         loss_X, loss_Q = self.get_loss(self.model, X_0, Q_0, t)
-        total_loss = loss_X + loss_Q
+        total_loss = loss_X + loss_Q ### TODO: Arreglar esto: 1/njoints * loss_X + loss_Q --> No, mirar documentación primero
         
         # Log loss
         self.log('validation_loss_X', loss_X, prog_bar=True)
@@ -167,6 +167,17 @@ if __name__ == "__main__":
     # trainer = pl.Trainer(max_epochs=150, precision="bf16-mixed", logger=tb_logger) #### TODO: LOOK!
     # trainer.fit(model)
 
-    LightningCLI(DiffusionModel, Lafan1DataModule)
+    print("AM I USING GPU? ", torch.cuda.is_available())
+    logger_config = {
+        'class_path': 'pytorch_lightning.loggers.TensorBoardLogger',
+        'init_args': {                      # Use init_args instead of params
+            'save_dir': 'lightning_logs',
+            'name': 'my_model_init',
+            'version': None
+        }
+    }
+
+    # Use LightningCLI with the updated logger configuration
+    LightningCLI(DiffusionModel, Lafan1DataModule, trainer_defaults={'logger': logger_config})
 
     ## COMMAND: python diffusion.py fit --config ./default_config.yaml
