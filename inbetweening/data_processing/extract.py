@@ -237,9 +237,9 @@ def bvh_to_item(bvh_path, window=50, offset=20):
 
     # Unify facing on last seed frame --> We always want to have the first pose facing "us", so we change all the other poses accordding to this.
     # Shape (n_sequences, window_size, n_joints, n_dimensions) --> n_dimensions is always 3, x, y, z
-    X, Q = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
+    X, Q, X_gobal_new, Q_global_new = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
 
-    return X, Q, X_global, Q_global, anim.parents, contacts_l, contacts_r, index_map
+    return X, Q, X_gobal_new, Q_global_new, anim.parents, contacts_l, contacts_r, index_map
 
 
 def get_lafan1_set(bvh_path, actors, window=50, offset=20):
@@ -312,9 +312,10 @@ def get_lafan1_set(bvh_path, actors, window=50, offset=20):
 
     # Unify facing on last seed frame --> We always want to have the first pose facing "us", so we change all the other poses accordding to this.
     # Shape (n_sequences, window_size, n_joints, n_dimensions) --> n_dimensions is always 3, x, y, z
-    X, Q = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
+    X, Q , X_gobal_new, Q_global_new = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
+    ## TODO: Ask if I should rotate the global too!!
 
-    return X, Q, anim.parents, contacts_l, contacts_r, index_map
+    return X, Q, X_gobal_new, Q_global_new, anim.parents, contacts_l, contacts_r, index_map
 
 
 def get_train_stats(bvh_folder, train_set):
@@ -323,7 +324,7 @@ def get_train_stats(bvh_folder, train_set):
     :return: Tuple of (local position mean vector, local position standard deviation vector, local joint offsets tensor)
     """
     print('Building the train set...')
-    xtrain, qtrain, parents, _, _, _ = get_lafan1_set(bvh_folder, train_set, window=50, offset=20)
+    xtrain, qtrain, _, _, parents, _, _, _ = get_lafan1_set(bvh_folder, train_set, window=50, offset=20)
 
     print('Computing stats...\n')
     # Joint offsets : are constant, so just take the first frame:
@@ -341,7 +342,7 @@ def get_train_stats(bvh_folder, train_set):
 if __name__ == "__main__":
     bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"
     actors = ['subject1', 'subject2', 'subject3', 'subject4']
-    X, Q, parents, contacts_l, contacts_r, index_map = get_lafan1_set(bvh_path, actors, window=50, offset=20)
+    X, Q, _, _, parents, contacts_l, contacts_r, index_map = get_lafan1_set(bvh_path, actors, window=50, offset=20)
     print(X)
 
     x_mean, x_std, _ = get_train_stats(bvh_path, actors)

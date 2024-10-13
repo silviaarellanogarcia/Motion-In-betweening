@@ -17,8 +17,8 @@ class Lafan1Dataset(Dataset):
             train (boolean): Indicates if the dataset is for training or testing
 
         Outputs:
-            X: local positions
-            Q: local quaternions
+            X: global positions
+            Q: global quaternions
             parents: list of parent indices defining the bone hierarchy
             contacts_l: binary tensor of left-foot contacts of shape (Batchsize, Timesteps, 2)
             contacts_r: binary tensor of right-foot contacts of shape (Batchsize, Timesteps, 2)
@@ -46,8 +46,8 @@ class Lafan1Dataset(Dataset):
                 self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = pickle.load(f)
                 print('Dataset loaded! (', filename, ')')
         else:
-            # Load the dataset using the existing get_lafan1_set function
-            self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = get_lafan1_set(self.data_dir, self.actors, self.window, self.offset)
+            # Load the dataset using the existing get_lafan1_set function --> ATTENTION! WE KEEP THE GLOBAL X AND Q
+            _, _, self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = get_lafan1_set(self.data_dir, self.actors, self.window, self.offset)
 
             # with open(filename, 'wb') as f:
             with open(filename, 'wb') as f:

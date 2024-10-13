@@ -293,7 +293,7 @@ def rotate_at_frame(X, Q, parents, n_past=10):
     # back to local quat-pos
     Q, X = quat_ik(new_glob_Q, new_glob_X, parents)
 
-    return X, Q
+    return X, Q, new_glob_Q, new_glob_X
 
 
 def extract_feet_contacts(pos, lfoot_idx, rfoot_idx, velfactor=0.02):
