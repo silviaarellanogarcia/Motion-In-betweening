@@ -53,7 +53,7 @@ class DiffusionModel(pl.LightningModule):
         self.gap_size = gap_size
         self.type_masking = type_masking
     
-    def masking(self, X_0, Q_0, gap_size, type='continued'):
+    def masking(self, n_frames, gap_size, type='continued'):
         """
         Masks the information of some frames in a motion sequence.
         Type can be 'continued' (the masked frames are one after the other) or 'spread' (the masked frames are placed randdomly on the sequence, except first and last position).
@@ -61,46 +61,29 @@ class DiffusionModel(pl.LightningModule):
         ## Shape of X: batch_size, frames, joints, position_dims
         ## Shape of Q: batch_size, frames, joints, quaternnion_dims
 
-        batch_size = X_0.shape[0]
-        n_frames = X_0.shape[1]
         masked_frames = []
 
-        if gap_size >= n_frames - 2:
-            print('ATTENTION: Your gap size is bigger or equal than the number of frames in your sequence.')
+        if gap_size > n_frames - 2:
+            raise AssertionError('Your gap size is bigger or equal than the number of frames in your sequence minus 2.')
+        if gap_size/n_frames >= 0.7:
+            print('Attention!! You are masking more than the 70% of frames!')
 
-        gap_size = min(gap_size, n_frames - 2) # The gap shouldn't be larger than the number of frames - 2 (start and end frame)
-
-        if type == 'continued':
-            start_frame = torch.randint(1, n_frames - gap_size - 1, (batch_size,)) # Select the start index randomly
-
-            for i in range(batch_size):
-                masked_frames_i = list(range(start_frame[i], start_frame[i] + gap_size))
-                masked_frames.append(masked_frames_i)
-
-                X_0[i, start_frame[i]:start_frame[i] + gap_size, :, :] = 0  # Set to 0 the frames from start frame to start frame + gap size
-                Q_0[i, start_frame[i]:start_frame[i] + gap_size, :, :] = 0
+        if type == 'continued': ## TODO: Corregir el forward para aplicar el ruido solo a estas muestras.
+            start_frame = int((n_frames - gap_size) / 2)
+            masked_frames = list(range(start_frame, start_frame + gap_size))
         
         elif type == 'spread':
-            for i in range(batch_size):
-                # Selection of 'gap_size' frames to mask, excluding the first and last frames
-                masked_frames_set = set()
-                while len(masked_frames_set) < gap_size:
-                    random_frame = torch.randint(1, n_frames - 1, (1,)).item()
-                    masked_frames_set.add(random_frame)
-                masked_frames = list(masked_frames_set)
-                masked_frames.append(masked_frames_i)
+            # Selection of 'gap_size' frames to mask, excluding the first and last frames
+            masked_frames = torch.randperm(n_frames - 2)[:gap_size] + 1  # +1 to exclude frame 0
+            masked_frames = masked_frames.tolist()  # Convert to list
 
-                # Apply the mask
-                X_0[i, masked_frames_i, :, :] = 0  # Set to 0 (masked)
-                Q_0[i, masked_frames_i, :, :] = 0  # Set to 0 (masked)
-        
-        return X_0, Q_0, masked_frames
+        return masked_frames
 
 
     def forward_diffusion_sample(self, X_0, Q_0, t, masked_frames):
         """ 
         Takes a motion sequence and a timestep as input and returns the noisy version of it
-        Important! It should only apply noise to the maskedd frames.
+        Important! It should only apply noise to the masked frames.
         """ 
         ## Apply noise to position --> It only needs to be applied on the root, not the offsets.
         noise_X = torch.randn_like(X_0)
@@ -108,8 +91,7 @@ class DiffusionModel(pl.LightningModule):
         sqrt_one_minus_alphas_cumprod_t_X = get_index_from_list(self.sqrt_one_minus_alphas_cumprod, t, X_0.shape)
 
         noisy_X_0 = X_0.clone()
-        for i in range(len(masked_frames)):
-            noisy_X_0[i, masked_frames[i], :, :] = (sqrt_alphas_cumprod_t_X.to(self.device) * X_0.to(self.device) + sqrt_one_minus_alphas_cumprod_t_X.to(self.device) * noise_X.to(self.device))[i, masked_frames[i], :, :].float()
+        noisy_X_0[:, masked_frames, 0, :] = (sqrt_alphas_cumprod_t_X.to(self.device) * X_0.to(self.device) + sqrt_one_minus_alphas_cumprod_t_X.to(self.device) * noise_X.to(self.device))[:, masked_frames, 0, :].float()
 
         ## Apply noise to quaternions
         noise_Q = torch.randn_like(Q_0)
@@ -117,8 +99,7 @@ class DiffusionModel(pl.LightningModule):
         sqrt_one_minus_alphas_cumprod_t_Q = get_index_from_list(self.sqrt_one_minus_alphas_cumprod, t, Q_0.shape)
 
         noisy_Q_0 = Q_0.clone()
-        for i in range(len(masked_frames)):
-            noisy_Q_0[i, masked_frames[i], :, :] = (sqrt_alphas_cumprod_t_Q.to(self.device) * Q_0.to(self.device) + sqrt_one_minus_alphas_cumprod_t_Q.to(self.device) * noise_Q.to(self.device))[i, masked_frames[i], :, :].float()
+        noisy_Q_0[:, masked_frames, :, :] = (sqrt_alphas_cumprod_t_Q.to(self.device) * Q_0.to(self.device) + sqrt_one_minus_alphas_cumprod_t_Q.to(self.device) * noise_Q.to(self.device))[:, masked_frames, :, :].float()
 
         # Normalize the quaternions to ensure they are valid unit quaternions
         noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
@@ -146,22 +127,19 @@ class DiffusionModel(pl.LightningModule):
         # Permute the dimensions to match the noise predictions # shape: (batch_size, position_and_angle_dims, frames * joints)
         noise_X_and_Q = noise_X_and_Q.permute(0, 2, 1) # shape: (batch_size, frames * joints, position_and_angle_dims)
         
+        # Create a tensor for the masked frames and the joints
+        masked_frames_tensor = torch.tensor(masked_frames).view(-1, 1)
+        joints_indices = torch.arange(joints).view(1, -1)
+
+        # Compute the flattened indices for the masked frames across all joints
+        masked_frames_indices_X = masked_frames_tensor.view(-1)
+        masked_frames_indices_Q = masked_frames_tensor + joints_indices * frames
+        masked_frames_indices_Q = masked_frames_indices_Q.view(-1)  # Flatten to 1D tensor
+        masked_frames_indices_Q = torch.unique(masked_frames_indices_Q)  # Ensure uniqueness
+
         # Calculate the loss
-        loss_X = 0
-        loss_Q = 0
-
-        for i in range(len(masked_frames)):
-            # Create a tensor for the masked frames and the joints
-            masked_frames_tensor = torch.tensor(masked_frames).view(-1, 1)
-            joints_indices = torch.arange(joints).view(1, -1)
-
-            # Compute the flattened indices for the masked frames across all joints
-            masked_frame_indices = masked_frames_tensor + joints_indices * frames
-            masked_frame_indices = masked_frame_indices.view(-1)  # Flatten to 1D tensor
-            masked_frame_indices = torch.unique(masked_frame_indices)  # Ensure uniqueness
-
-            loss_X += F.mse_loss(noise_X_and_Q[i, masked_frame_indices, :3], noise_pred[i, masked_frame_indices, :3], reduction='sum')
-            loss_Q += F.mse_loss(noise_X_and_Q[i, masked_frame_indices, 3:], noise_pred[i, masked_frame_indices, 3:], reduction='sum')
+        loss_X = F.mse_loss(noise_X_and_Q[:, masked_frames_indices_X, :3], noise_pred[:, masked_frames_indices_X, :3], reduction='sum')
+        loss_Q = F.mse_loss(noise_X_and_Q[:, masked_frames_indices_Q, 3:], noise_pred[:, masked_frames_indices_Q, 3:], reduction='sum')
         
         return loss_X, loss_Q
     
@@ -172,11 +150,11 @@ class DiffusionModel(pl.LightningModule):
         t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
 
         # Masking
-        X_0, Q_0, masked_frames = self.masking(X_0, Q_0, gap_size=self.gap_size, type=self.type_masking)
+        masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
         # Calculate loss
         loss_X, loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)
-        total_loss = (loss_X + loss_Q) / X_0.shape[0]
+        total_loss = ((1/X_0.shape[2] * loss_X) + loss_Q) / X_0.shape[0]
         
         # Log loss
         self.log('train_loss_X', loss_X, prog_bar=True)
@@ -192,7 +170,7 @@ class DiffusionModel(pl.LightningModule):
         t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
 
         # Masking
-        X_0, Q_0, masked_frames = self.masking(X_0, Q_0, gap_size=self.gap_size, type=self.type_masking)
+        masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
         # Calculate loss
         loss_X, loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)
@@ -212,7 +190,7 @@ class DiffusionModel(pl.LightningModule):
         t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
 
         # Masking
-        X_0, Q_0, masked_frames = self.masking(X_0, Q_0, gap_size=self.gap_size, type=self.type_masking)
+        masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
         # Calculate loss
         loss_X, loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)

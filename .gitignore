@@ -7,3 +7,5 @@ package.egg-info
 lightning_logs/
 logs/
 inbetweening/model/pickle_data
+error_*
+output_*
