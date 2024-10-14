@@ -244,10 +244,18 @@ if __name__ == "__main__":
     }
 
     checkpoint_callback = ModelCheckpoint(
-        save_top_k=-1,  # Keep all checkpoints
+        save_top_k=3,  # Keep 3 checkpoints
+        monitor='validation_total_loss',
+        mode="min"
     )
 
     # Use LightningCLI with the updated logger configuration
-    LightningCLI(DiffusionModel, Lafan1DataModule, trainer_defaults={'logger': logger_config})
+    LightningCLI(DiffusionModel, 
+                 Lafan1DataModule, 
+                 trainer_defaults={
+                     'logger': logger_config,
+                     'callbacks': [checkpoint_callback],
+    })
 
     ## COMMAND: python diffusion.py fit --config ./default_config.yaml
+    ## For continue training from a checkpoint: python diffusion.py fit --config ./default_config.yaml --ckpt_path PATH
