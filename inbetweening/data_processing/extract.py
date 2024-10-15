@@ -312,7 +312,7 @@ def get_lafan1_set(bvh_path, actors, window=50, offset=20):
 
     # Unify facing on last seed frame --> We always want to have the first pose facing "us", so we change all the other poses accordding to this.
     # Shape (n_sequences, window_size, n_joints, n_dimensions) --> n_dimensions is always 3, x, y, z
-    X, Q , X_global_new, Q_global_new = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
+    X, Q , Q_global_new, X_global_new = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
     ## TODO: Ask if I should rotate the global too!!
 
     return X, Q, X_global_new, Q_global_new, anim.parents, contacts_l, contacts_r, index_map

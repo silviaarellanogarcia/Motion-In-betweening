@@ -118,28 +118,31 @@ class DiffusionModel(pl.LightningModule):
 
         # Reshape the noise so that it has the same structure as the noise prediction.
         batch_size, frames, joints, position_dims = noise_X.shape
-        noise_X = noise_X.view(batch_size, position_dims, frames * joints)
+        noise_X = noise_X.view(batch_size, frames * joints, position_dims)
+
         batch_size, frames, joints, quaternion_dims = noise_Q.shape
-        noise_Q = noise_Q.view(batch_size, quaternion_dims, frames * joints)
+        noise_Q = noise_Q.view(batch_size, frames * joints, quaternion_dims)
 
         # Concatenate the channels dimensions to consider X and Q at the same time
-        noise_X_and_Q = torch.cat((noise_X, noise_Q), dim=1)
-        # Permute the dimensions to match the noise predictions # shape: (batch_size, position_and_angle_dims, frames * joints)
-        noise_X_and_Q = noise_X_and_Q.permute(0, 2, 1) # shape: (batch_size, frames * joints, position_and_angle_dims)
+        noise_X_and_Q = torch.cat((noise_X, noise_Q), dim=2)
         
         # Create a tensor for the masked frames and the joints
         masked_frames_tensor = torch.tensor(masked_frames).view(-1, 1)
-        joints_indices = torch.arange(joints).view(1, -1)
 
-        # Compute the flattened indices for the masked frames across all joints
-        masked_frames_indices_X = masked_frames_tensor.view(-1)
-        masked_frames_indices_Q = masked_frames_tensor + joints_indices * frames
-        masked_frames_indices_Q = masked_frames_indices_Q.view(-1)  # Flatten to 1D tensor
-        masked_frames_indices_Q = torch.unique(masked_frames_indices_Q)  # Ensure uniqueness
+        # Compute which are the masked joints
+        ## Masking of X
+        masked_frames_tensor = masked_frames_tensor.view(-1)
+        masked_elements_X = masked_frames_tensor * joints + 0 ## Plus 0 because I only consider the root, not other joints
+
+        ## Masking of Q
+        # Find the index of the row corresponding to all joints that need to be masked (frame to frame + joints - 1)
+        incremental_numbers = torch.arange(0, joints)
+        incremented_elements = masked_elements_X.unsqueeze(1) + incremental_numbers
+        masked_elements_Q = incremented_elements.flatten()
 
         # Calculate the loss
-        loss_X = F.mse_loss(noise_X_and_Q[:, masked_frames_indices_X, :3], noise_pred[:, masked_frames_indices_X, :3], reduction='sum')
-        loss_Q = F.mse_loss(noise_X_and_Q[:, masked_frames_indices_Q, 3:], noise_pred[:, masked_frames_indices_Q, 3:], reduction='sum')
+        loss_X = F.mse_loss(noise_X_and_Q[:, masked_elements_X, :3], noise_pred[:, masked_elements_X, :3], reduction='sum')
+        loss_Q = F.mse_loss(noise_X_and_Q[:, masked_elements_Q, 3:], noise_pred[:, masked_elements_Q, 3:], reduction='sum')
         
         return loss_X, loss_Q
     
