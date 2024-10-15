@@ -10,6 +10,6 @@ mamba activate inbetweening
 export PYTHONPATH=$PYTHONPATH:/proj/diffusion-inbetweening
 echo $PYTHONPATH
 cd model/
-python diffusion.py fit --config ./default_config.yaml
+python diffusion.py fit --config ./config.yaml
 
 # Script ends here
