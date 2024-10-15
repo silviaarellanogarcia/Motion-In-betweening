@@ -33,7 +33,7 @@ def get_index_from_list(vals, t, x_shape):
 
 
 class DiffusionModel(pl.LightningModule):
-    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr:float, gap_size:int, type_masking:str):
+    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int]):
         super().__init__() # Initialize the parent's class before initializing any child
 
         # Get beta scheduler
@@ -47,7 +47,7 @@ class DiffusionModel(pl.LightningModule):
         self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
 
-        self.model = SimpleUnet()
+        self.model = SimpleUnet(time_emb_dim, window, n_joints, down_channels)
         self.lr = lr
 
         self.gap_size = gap_size
@@ -68,7 +68,7 @@ class DiffusionModel(pl.LightningModule):
         if gap_size/n_frames >= 0.7:
             print('Attention!! You are masking more than the 70% of frames!')
 
-        if type == 'continued': ## TODO: Corregir el forward para aplicar el ruido solo a estas muestras.
+        if type == 'continued':
             start_frame = int((n_frames - gap_size) / 2)
             masked_frames = list(range(start_frame, start_frame + gap_size))
         
@@ -157,9 +157,9 @@ class DiffusionModel(pl.LightningModule):
         total_loss = ((1/X_0.shape[2] * loss_X) + loss_Q) / X_0.shape[0]
         
         # Log loss
-        self.log('train_loss_X', loss_X, prog_bar=True)
-        self.log('train_loss_Q', loss_Q, prog_bar=True)
-        self.log('train_total_loss', total_loss, prog_bar=True)
+        self.log('train_loss_X', loss_X, prog_bar=True, on_step=True)
+        self.log('train_loss_Q', loss_Q, prog_bar=True, on_step=True)
+        self.log('train_total_loss', total_loss, prog_bar=True, on_step=True)
 
         return total_loss
     
@@ -177,9 +177,9 @@ class DiffusionModel(pl.LightningModule):
         total_loss = (loss_X + loss_Q) / X_0.shape[0]
         
         # Log loss
-        self.log('validation_loss_X', loss_X, prog_bar=True)
-        self.log('validation_loss_Q', loss_Q, prog_bar=True)
-        self.log('validation_total_loss', total_loss, prog_bar=True)
+        self.log('validation_loss_X', loss_X, prog_bar=True, on_step=True)
+        self.log('validation_loss_Q', loss_Q, prog_bar=True, on_step=True)
+        self.log('validation_total_loss', total_loss, prog_bar=True, on_step=True)
 
         return total_loss
     
@@ -197,9 +197,9 @@ class DiffusionModel(pl.LightningModule):
         total_loss = (loss_X + loss_Q) / X_0.shape[0]
         
         # Log loss
-        self.log('test_loss_X', loss_X, prog_bar=True)
-        self.log('test_loss_Q', loss_Q, prog_bar=True)
-        self.log('test_total_loss', total_loss, prog_bar=True)
+        self.log('test_loss_X', loss_X, prog_bar=True, on_step=True)
+        self.log('test_loss_Q', loss_Q, prog_bar=True, on_step=True)
+        self.log('test_total_loss', total_loss, prog_bar=True, on_step=True)
 
         return total_loss
 
@@ -222,7 +222,7 @@ if __name__ == "__main__":
     }
 
     checkpoint_callback = ModelCheckpoint(
-        save_top_k=3,  # Keep 3 checkpoints
+        save_top_k=10,  # Keep 10 checkpoints
         monitor='validation_total_loss',
         mode="min"
     )

@@ -1,17 +1,21 @@
 trainer:
-  max_epochs: 150
+  max_epochs: 300
   precision: bf16-mixed  # TODO: LOOK!! Potential source of error
 
+data:
+  data_dir: /proj/diffusion-inbetweening/data_one_sample
+  batch_size: 16
+  window: &window_val 50
+  offset: 20
+  
 model:
   lr: 0.001 
   beta_start: 0.0001 
   beta_end: 0.02
   n_diffusion_timesteps: 300
-  gap_size: 5
+  gap_size: 2
   type_masking: 'continued' # Options are continued or spread
-
-data:
-  data_dir: /proj/diffusion-inbetweening/data
-  batch_size: 8
-  window: 50
-  offset: 20
+  time_emb_dim: 32
+  window: *window_val
+  n_joints: 22 ## Hardcoded according to the dataset
+  down_channels: [1024, 512, 256, 128, 64]

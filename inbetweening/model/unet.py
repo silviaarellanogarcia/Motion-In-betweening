@@ -54,13 +54,14 @@ class SimpleUnet(nn.Module):
     """
     A simplified variant of the Unet architecture.
     """
-    def __init__(self):
+    def __init__(self, time_emb_dim, window, n_joints, down_channels):
         super().__init__()
-        frames_per_joints = 50 * 22 ## TODO: window_size*njoints. Generalize
+        frames_per_joints = window * n_joints
 
-        self.down_channels = (1024, 512, 256, 128, 64) # TODO: Right part of the UNet ## Check that 1024 is not higher than original data dim !!!!! --> [1, 7, 1100] to [1,1024,1100]
-        self.up_channels = (64, 128, 256, 512, 1024) # Left part of the UNet
-        time_emb_dim = 32 ## TODO: CHECK! Try different values. It's an hyperparameter!
+        self.down_channels = down_channels # Right part of the UNet
+        self.up_channels = self.down_channels[::-1] # Same channels than down_channels, but reversed
+        print(self.up_channels)
+        time_emb_dim = time_emb_dim
 
         # Time embedding
         self.time_mlp = nn.Sequential(
