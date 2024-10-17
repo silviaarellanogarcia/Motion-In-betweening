@@ -37,7 +37,6 @@ def get_index_from_list(vals, t, x_shape):
 class DiffusionModel(pl.LightningModule):
     def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int]):
         super().__init__() # Initialize the parent's class before initializing any child
-        self.test_step_outputs = []
 
         # Get beta scheduler
         betas = get_scheduler('linear', n_diffusion_timesteps, beta_start, beta_end)
@@ -231,10 +230,10 @@ class DiffusionModel(pl.LightningModule):
 
         return total_loss
     
-    def test_step(self, batch, batch_idx):
-        # Batch processing
-        X_0 = batch['X']
-        Q_0 = batch['Q']
+    def generate_samples(self, X_0, Q_0):
+        X_0 = X_0.unsqueeze(0) ## This adds the batch dimension
+        Q_0 = Q_0.unsqueeze(0) ## This adds the batch dimension
+
         t = torch.full((X_0.shape[0],), self.n_diffusion_timesteps - 1, device=self.device).long()
 
         # Masking
@@ -253,26 +252,12 @@ class DiffusionModel(pl.LightningModule):
 
             # Normalize quaternions to ensure they remain valid unit quaternions
             noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
-        
-        self.test_step_outputs = {'denoised_X': noisy_X_0, 'denoised_Q': noisy_Q_0}
-        print(torch.cuda.memory_summary())
 
-        return {'denoised_X': noisy_X_0, 'denoised_Q': noisy_Q_0}
-    
-    def on_test_epoch_end(self):
-        denoised_X = self.test_step_outputs['denoised_X']
-        denoised_Q = self.test_step_outputs['denoised_Q']
+        # These two lines are temporary. TODO: Substitute with something more meaningful like generating the BVH
+        print("Denoised sequences X:", noisy_X_0[:, :, 0, :])
+        print("Denoised sequences Q:", noisy_Q_0.shape)
 
-        # Optionally, you can save or further process all_denoised_X and all_denoised_Q
-        print("Denoised sequences X:", denoised_X.shape)
-        print("Denoised sequences Q:", denoised_Q.shape)
-
-        parents = [-1,  0,  1,  2,  3,  0,  5,  6,  7,  0,  9, 10, 11, 12, 11, 14, 15, 16, 11, 18, 19, 20] ## TODO: Get this from the data, not harcoding it.
-        # plot_3d_skeleton_with_lines(denoised_X, parents, sequence_index=0, frames_range=(0, 2))
-
-        # For example, you could save the outputs to disk:
-        # torch.save(all_denoised_X, 'denoised_X.pt')
-        # torch.save(all_denoised_Q, 'denoised_Q.pt')
+        return noisy_X_0[0], noisy_Q_0[0]
 
 
     def configure_optimizers(self):

@@ -23,7 +23,7 @@ n_joints = config['model']['n_joints']
 down_channels = config['model']['down_channels']
 
 model = DiffusionModel.load_from_checkpoint(
-    '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init/version_4/checkpoints/epoch=697-step=168218.ckpt',
+    '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init/version_17/checkpoints/epoch=171-step=41452.ckpt',
     beta_start=beta_start,
     beta_end=beta_end,
     n_diffusion_timesteps=n_diffusion_timesteps,
@@ -43,6 +43,16 @@ data_module = Lafan1DataModule(
     offset=20
 )
 
-trainer = Trainer(accelerator='gpu' if torch.cuda.is_available() else 'cpu')
+data_module.setup(stage='test')
 
-trainer.test(model=model, datamodule=data_module)
+# Get a single sample from the test dataset
+sample_index = 0  # Adjust this index as needed
+test_dataset = data_module.test_dataset
+sample = test_dataset[sample_index]
+sample = {key: value.to(model.device) for key, value in sample.items()}
+
+# ATTENTION! For generating the BVH take into account that the X is local (except the root), and the Q is global.
+denoised_X, denoised_Q = model.generate_samples(sample['X'], sample['Q'])
+print('Inbetweening finished!')
+print("ORIGINAL SAMPLE: ", denoised_X[:,0,:])
+print("DENOISED SAMPLE: ", sample['X'][:,0,:])
