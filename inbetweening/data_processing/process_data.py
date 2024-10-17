@@ -46,8 +46,8 @@ class Lafan1Dataset(Dataset):
                 self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = pickle.load(f)
                 print('Dataset loaded! (', filename, ')')
         else:
-            # Load the dataset using the existing get_lafan1_set function --> ATTENTION! WE KEEP THE GLOBAL X AND Q
-            _, _, self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = get_lafan1_set(self.data_dir, self.actors, self.window, self.offset)
+            # Load the dataset using the existing get_lafan1_set function --> ATTENTION! WE KEEP THE GLOBAL Q. FOR THE X WE DON'T CARE, SINCE THE ROOT IS ALWAYS GLOBAL
+            self.X, _, _, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = get_lafan1_set(self.data_dir, self.actors, self.window, self.offset) ### OJO!!!!! TODO: HE CAMBIADO ESTO PARA QUE LA X ESTÉ CENTRADA
 
             # with open(filename, 'wb') as f:
             with open(filename, 'wb') as f:

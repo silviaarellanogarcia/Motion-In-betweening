@@ -9,7 +9,7 @@ data:
   offset: 20
   
 model:
-  lr: 0.05 
+  lr: 0.01
   beta_start: 0.0001 
   beta_end: 0.02
   n_diffusion_timesteps: 300
@@ -18,4 +18,4 @@ model:
   time_emb_dim: 32
   window: *window_val
   n_joints: 22 ## Hardcoded according to the dataset
-  down_channels: [1024, 512, 256, 128, 64]
+  down_channels: [512, 256, 128, 64, 32]

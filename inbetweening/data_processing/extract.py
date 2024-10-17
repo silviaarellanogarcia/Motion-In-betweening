@@ -3,6 +3,7 @@
 import re, os, ntpath
 import numpy as np
 import inbetweening.data_processing.utils as utils
+from inbetweening.utils.aux_functions import plot_3d_skeleton_with_lines, plot_root
 
 channelmap = {
     'Xrotation': 'x',
@@ -313,6 +314,9 @@ def get_lafan1_set(bvh_path, actors, window=50, offset=20):
     # Unify facing on last seed frame --> We always want to have the first pose facing "us", so we change all the other poses accordding to this.
     # Shape (n_sequences, window_size, n_joints, n_dimensions) --> n_dimensions is always 3, x, y, z
     X, Q , Q_global_new, X_global_new = utils.rotate_at_frame(X, Q, anim.parents, n_past=npast)
+    # plot_3d_skeleton_with_lines(X_global_new, anim.parents, sequence_index=0, frames_range=(0, 2))
+    # plot_root(X_global_new[:, :, 0, :], start_frame=0, end_frame=49, sequence_index=0)
+
     ## TODO: Ask if I should rotate the global too!!
 
     return X, Q, X_global_new, Q_global_new, anim.parents, contacts_l, contacts_r, index_map

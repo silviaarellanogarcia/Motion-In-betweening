@@ -85,15 +85,12 @@ class SimpleUnet(nn.Module):
         t = self.time_mlp(timestep)
 
         batch_size, frames, joints, quaternion_dims = X.shape
-        X = X.view(batch_size, quaternion_dims, frames * joints)
+        X = X.view(batch_size, frames * joints, quaternion_dims)
         batch_size, frames, joints, quaternion_dims = Q.shape
-        Q = Q.view(batch_size, quaternion_dims, frames * joints) 
+        Q = Q.view(batch_size, frames * joints, quaternion_dims) 
 
         # Concatenate the channels dimensions to be able to pass to the network X and Q at the same time
-        X_and_Q = torch.cat((X, Q), dim=1)
-
-        # Change the order of the dimensions to increase/decrease the frames*joints dimensions.
-        X_and_Q = X_and_Q.permute(0, 2, 1)
+        X_and_Q = torch.cat((X, Q), dim=2)
 
         # Initial conv and safety check
         X_and_Q = self.conv0(X_and_Q.float())

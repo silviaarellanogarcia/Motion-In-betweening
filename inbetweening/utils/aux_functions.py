@@ -57,3 +57,27 @@ def plot_3d_skeleton_with_lines(X_gt_global, hierarchy, sequence_index=0, frames
 
     # Display the plot
     plt.show()
+
+def plot_root(X_root, start_frame, end_frame, sequence_index=0):
+    # Create a 3D plot
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    sequence = X_root[sequence_index]
+
+    # Iterate over the frames in the specified range
+    for t in range(start_frame, end_frame):
+        joints = sequence[t]  # shape (num_joints, 3)
+
+        # Extract x, y, z coordinates
+        xs = joints[0]
+        ys = joints[1]
+        zs = joints[2]
+
+        # Plot the joints themselves
+        ax.scatter(xs, ys, zs, color='blue')
+
+    # Labels and title
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title(f'3D Root trajectory')
