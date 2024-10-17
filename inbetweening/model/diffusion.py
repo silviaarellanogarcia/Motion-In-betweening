@@ -37,6 +37,7 @@ def get_index_from_list(vals, t, x_shape):
 class DiffusionModel(pl.LightningModule):
     def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int]):
         super().__init__() # Initialize the parent's class before initializing any child
+        self.test_step_outputs = []
 
         # Get beta scheduler
         betas = get_scheduler('linear', n_diffusion_timesteps, beta_start, beta_end)
@@ -252,15 +253,19 @@ class DiffusionModel(pl.LightningModule):
 
             # Normalize quaternions to ensure they remain valid unit quaternions
             noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
+        
+        self.test_step_outputs = {'denoised_X': noisy_X_0, 'denoised_Q': noisy_Q_0}
+        print(torch.cuda.memory_summary())
 
         return {'denoised_X': noisy_X_0, 'denoised_Q': noisy_Q_0}
     
-    def on_test_epoch_end(self, outputs):
-        denoised_X = outputs['denoised_X']
-        denoised_Q = outputs['denoised_Q']
+    def on_test_epoch_end(self):
+        denoised_X = self.test_step_outputs['denoised_X']
+        denoised_Q = self.test_step_outputs['denoised_Q']
 
         # Optionally, you can save or further process all_denoised_X and all_denoised_Q
-        print("Denoised sequences collected:", denoised_X.shape, denoised_Q.shape)
+        print("Denoised sequences X:", denoised_X.shape)
+        print("Denoised sequences Q:", denoised_Q.shape)
 
         parents = [-1,  0,  1,  2,  3,  0,  5,  6,  7,  0,  9, 10, 11, 12, 11, 14, 15, 16, 11, 18, 19, 20] ## TODO: Get this from the data, not harcoding it.
         # plot_3d_skeleton_with_lines(denoised_X, parents, sequence_index=0, frames_range=(0, 2))
