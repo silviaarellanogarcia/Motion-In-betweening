@@ -10,6 +10,8 @@ from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.cli import LightningCLI
 from pytorch_lightning.callbacks import ModelCheckpoint
 
+# from inbetweening.utils.aux_functions import plot_3d_skeleton_with_lines
+
 def get_scheduler(schedule_name, n_diffusion_timesteps, beta_start, beta_end):
     """
     Define a noise scheduler
@@ -46,9 +48,13 @@ class DiffusionModel(pl.LightningModule):
         self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0) ## Adds a 1 at the beginning. At t=0 we have all the info
         self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
+        self.sqrt_recip_alphas = torch.sqrt(1.0 / alphas)
+        self.posterior_variance = betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
 
         self.model = SimpleUnet(time_emb_dim, window, n_joints, down_channels)
         self.lr = lr
+        self.window = window
+        self.n_joints = n_joints
 
         self.gap_size = gap_size
         self.type_masking = type_masking
@@ -105,6 +111,44 @@ class DiffusionModel(pl.LightningModule):
         noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
         
         return noisy_X_0, noisy_Q_0, noise_X, noise_Q
+    
+    def sample_timestep(self, noisy_X, noisy_Q, t):
+        """
+        Calls the model to predict the noise in the motion sequence and returns the denoised image. 
+        Applies noise to this motion sequence, if we are not in the last step yet.
+        """
+        betas_t = get_index_from_list(self.betas, t, noisy_X.shape)
+        sqrt_one_minus_alphas_cumprod_t = get_index_from_list(self.sqrt_one_minus_alphas_cumprod, t, noisy_X.shape)
+        sqrt_recip_alphas_t = get_index_from_list(self.sqrt_recip_alphas, t, noisy_X.shape)
+
+        noise_pred = self.model(noisy_X, noisy_Q, t) ### I will have X and Q together and I have to separate them.
+        noise_X_pred = noise_pred[:, :, :3] # torch.Size([1, 1100, 3])
+        noise_Q_pred = noise_pred[:, :, 3:] # torch.Size([1, 1100, 4])
+
+        # Convert back to the shape (1, 50, 22, 3) --> TODO: BE CAREFUL!
+        batch_size = t.shape[0]
+        noise_X_pred = noise_X_pred.view(batch_size, self.window, self.n_joints, 3)
+        noise_Q_pred = noise_Q_pred.view(batch_size, self.window, self.n_joints, 4)
+
+        # Call model (current image - noise prediction)
+        model_mean_X = sqrt_recip_alphas_t * (noisy_X - betas_t * noise_X_pred / sqrt_one_minus_alphas_cumprod_t) ## noise_X_pred refers to the "z" in the equation
+        model_mean_Q = sqrt_recip_alphas_t * (noisy_Q - betas_t * noise_Q_pred / sqrt_one_minus_alphas_cumprod_t)
+
+        posterior_variance_t = get_index_from_list(self.posterior_variance, t, noisy_X.shape)
+        
+        if t == 0:
+            ## Current model_mean_X and model_mean_Q contain all the frames. In the training step I should only keep the ones that correspond to the gap and 
+            ## incorporate these into the complete sequence.
+            return model_mean_X, model_mean_Q
+        else:
+            ## These X and Q minus one contain everything, but I should only keep the part that corresponds to the gap, and concatenate that to the original motion.
+            X_minus_one = model_mean_X + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_X) 
+            Q_minus_one = model_mean_Q + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_Q) 
+            ### TODO: Maybe it's better to predict the clean motion instead of the noise (predict x_{0} directly, not x_{t-1})
+
+            ## Current X_minus_one and Q_minus_one contain all the frames. In the training step I should only keep the ones that correspond to the gap and 
+            ## incorporate these into the complete sequence.
+            return X_minus_one, Q_minus_one
     
     
     def get_loss(self, model, X_0, Q_0, t, masked_frames):
@@ -190,21 +234,40 @@ class DiffusionModel(pl.LightningModule):
         # Batch processing
         X_0 = batch['X']
         Q_0 = batch['Q']
-        t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
+        t = torch.full((X_0.shape[0],), self.n_diffusion_timesteps - 1, device=self.device).long()
 
         # Masking
         masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
         # Calculate loss
-        loss_X, loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)
-        total_loss = (loss_X + loss_Q) / X_0.shape[0]
-        
-        # Log loss
-        self.log('test_loss_X', loss_X, prog_bar=True, on_step=True)
-        self.log('test_loss_Q', loss_Q, prog_bar=True, on_step=True)
-        self.log('test_total_loss', total_loss, prog_bar=True, on_step=True)
+        noisy_X_0, noisy_Q_0, _, _ = self.forward_diffusion_sample(X_0, Q_0, t, masked_frames)
 
-        return total_loss
+        for step in reversed(range(self.n_diffusion_timesteps)):
+            t_step = torch.tensor([step], device=self.device).long()
+
+            # Denoise positions and quaternions
+            denoised_X_complete_seq, denoised_Q_complete_seq = self.sample_timestep(noisy_X_0, noisy_Q_0, t_step)
+            noisy_X_0[:, masked_frames, :, :] = denoised_X_complete_seq[:, masked_frames, :, :].float()
+            noisy_Q_0[:, masked_frames, :, :] = denoised_Q_complete_seq[:, masked_frames, :, :].float()
+
+            # Normalize quaternions to ensure they remain valid unit quaternions
+            noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
+
+        return {'denoised_X': noisy_X_0, 'denoised_Q': noisy_Q_0}
+    
+    def on_test_epoch_end(self, outputs):
+        denoised_X = outputs['denoised_X']
+        denoised_Q = outputs['denoised_Q']
+
+        # Optionally, you can save or further process all_denoised_X and all_denoised_Q
+        print("Denoised sequences collected:", denoised_X.shape, denoised_Q.shape)
+
+        parents = [-1,  0,  1,  2,  3,  0,  5,  6,  7,  0,  9, 10, 11, 12, 11, 14, 15, 16, 11, 18, 19, 20] ## TODO: Get this from the data, not harcoding it.
+        # plot_3d_skeleton_with_lines(denoised_X, parents, sequence_index=0, frames_range=(0, 2))
+
+        # For example, you could save the outputs to disk:
+        # torch.save(all_denoised_X, 'denoised_X.pt')
+        # torch.save(all_denoised_Q, 'denoised_Q.pt')
 
 
     def configure_optimizers(self):
