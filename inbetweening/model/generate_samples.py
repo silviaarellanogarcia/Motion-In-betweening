@@ -5,6 +5,8 @@ import yaml
 
 from inbetweening.data_processing.process_data import Lafan1DataModule
 from inbetweening.model.diffusion import DiffusionModel
+from inbetweening.utils.aux_functions import plot_3d_skeleton_with_lines, plot_root
+from inbetweening.data_processing.utils import compute_global_positions_in_a_sample
 
 # Load the config file
 with open('config.yaml', 'r') as f:
@@ -37,7 +39,7 @@ model = DiffusionModel.load_from_checkpoint(
 )
 
 data_module = Lafan1DataModule(
-    data_dir='/proj/diffusion-inbetweening/data',
+    data_dir='/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1',
     batch_size=1,
     window=50,
     offset=20
@@ -54,5 +56,14 @@ sample = {key: value.to(model.device) for key, value in sample.items()}
 # ATTENTION! For generating the BVH take into account that the X is local (except the root), and the Q is global.
 denoised_X, denoised_Q = model.generate_samples(sample['X'], sample['Q'])
 print('Inbetweening finished!')
-print("ORIGINAL SAMPLE: ", denoised_X[:,0,:])
-print("DENOISED SAMPLE: ", sample['X'][:,0,:])
+print("ORIGINAL SAMPLE: ", denoised_X[22:27,0,:])
+print("DENOISED SAMPLE: ", sample['X'][22:27,0,:])
+
+X_gt_global = compute_global_positions_in_a_sample(sample['X'], sample['Q'], sample['parents'])
+X_denoised_global = compute_global_positions_in_a_sample(denoised_X, denoised_Q, sample['parents'])
+
+plot_3d_skeleton_with_lines(torch.tensor(X_gt_global).unsqueeze(0), sample['parents'], sequence_index=0, frames_range=(24, 25))
+plot_3d_skeleton_with_lines(torch.tensor(X_denoised_global).unsqueeze(0), sample['parents'], sequence_index=0, frames_range=(24, 25))
+
+# plot_root(sample['X'].unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
+# plot_root(denoised_X.unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)

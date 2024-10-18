@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 
 def length(x, axis=-1, keepdims=True):
@@ -102,6 +103,40 @@ def quat_fk(lrot, lpos, parents):
     res = np.concatenate(gr, axis=-2), np.concatenate(gp, axis=-2)
     return res
 
+def compute_global_positions_in_a_sample(X, Q, parents):
+    """
+    Compute global positions of joints given local positions and global rotations.
+
+    :param X: Local joint positions of shape (n_frames, n_joints, pos_dims)
+    :param Q: Quaternions of shape (n_frames, n_joints, quat_dims)
+    :param parents: Parent joint indices (list or array) of shape (n_joints,)
+    :return: Global joint positions of shape (n_frames, n_joints, pos_dims)
+    """
+    n_frames, n_joints, pos_dims = X.shape
+    X_global = np.zeros((n_frames, n_joints, pos_dims))  # Initialize global positions
+
+    if isinstance(X, torch.Tensor):
+        X = X.detach().numpy()
+        Q = Q.detach().numpy()
+
+    for frame in range(n_frames):
+        for joint in range(n_joints):
+            if parents[joint] == -1:  # Root joint
+                X_global[frame, joint] = X[frame, joint]
+            else:
+                # Get parent joint's global position and rotation
+                parent_index = parents[joint]
+                parent_position = X_global[frame, parent_index]
+                parent_rotation = Q[frame, parent_index]
+
+                # Compute the global position of the current joint
+                quat_rotated_pos = quat_mul_vec(parent_rotation[None, :], X[frame, joint][None, :]).squeeze(0)
+                global_position = parent_position + quat_rotated_pos
+
+                # Store the global position
+                X_global[frame, joint] = global_position
+
+    return X_global
 
 def quat_ik(grot, gpos, parents):
     """

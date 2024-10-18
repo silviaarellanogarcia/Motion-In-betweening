@@ -81,3 +81,4 @@ def plot_root(X_root, start_frame, end_frame, sequence_index=0):
     ax.set_ylabel('Y')
     ax.set_zlabel('Z')
     ax.set_title(f'3D Root trajectory')
+    plt.show()
