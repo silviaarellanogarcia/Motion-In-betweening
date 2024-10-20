@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
+from inbetweening.data_processing.utils import quat_ik_Q
+
 def write_joint(f, joint_idx, X, parents, level=0):
     """Writes a single joint in the BVH hierarchy."""
     indent = '    ' * level
@@ -64,11 +66,22 @@ def write_motion(f, X, Q, parents, frame_time):
             f.write(f"{rot[0]:.6f} {rot[1]:.6f} {rot[2]:.6f} ")
         f.write("\n")
 
-def write_bvh(filename, X, Q, parents, frame_time=1.0 / 30):
+def write_bvh(filename, X, parents, Q_global=None, Q_local=None, frame_time=1.0 / 30):
     """Main function to write the BVH file."""
+    
+    if Q_global == None and Q_local == None:
+        print("You forgot to provide either Q_local or Q_global!")
+        return
+    elif Q_local != None:
+        Q = Q_local
+    elif Q_global != None:
+        Q = quat_ik_Q(Q_global.detach().numpy(), parents)
+
     with open(filename, 'w') as f:
         # Write the HIERARCHY section
         write_hierarchy(f, X, parents)
         
         # Write the MOTION section
         write_motion(f, X, Q, parents, frame_time)
+
+    print("BVH saved!")

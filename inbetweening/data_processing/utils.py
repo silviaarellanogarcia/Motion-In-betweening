@@ -162,6 +162,19 @@ def quat_ik(grot, gpos, parents):
 
     return res
 
+def quat_ik_Q(grot, parents):
+    """
+    Performs Inverse Kinematics (IK) on global quaternions to retrieve local rotations
+
+    :param grot: tensor of global quaternions with shape (..., Nb of joints, 4)
+    :param parents: list of parents indices
+    :return: tensor of local quaternions
+    """
+
+    lrot = np.concatenate([grot[..., :1, :], quat_mul(quat_inv(grot[..., parents[1:], :]), grot[..., 1:, :])], axis=-2)
+
+    return lrot
+
 
 def quat_mul(x, y):
     """

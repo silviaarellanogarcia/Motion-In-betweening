@@ -7,6 +7,7 @@ from inbetweening.data_processing.process_data import Lafan1DataModule
 from inbetweening.model.diffusion import DiffusionModel
 from inbetweening.utils.aux_functions import plot_3d_skeleton_with_lines, plot_root
 from inbetweening.data_processing.utils import compute_global_positions_in_a_sample
+from inbetweening.utils.convert_to_bvh import write_bvh
 
 # Load the config file
 with open('config.yaml', 'r') as f:
@@ -25,7 +26,7 @@ n_joints = config['model']['n_joints']
 down_channels = config['model']['down_channels']
 
 model = DiffusionModel.load_from_checkpoint(
-    '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init/version_17/checkpoints/epoch=171-step=41452.ckpt',
+    '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init/version_24/checkpoints/epoch=617-step=148938.ckpt',
     beta_start=beta_start,
     beta_end=beta_end,
     n_diffusion_timesteps=n_diffusion_timesteps,
@@ -39,7 +40,7 @@ model = DiffusionModel.load_from_checkpoint(
 )
 
 data_module = Lafan1DataModule(
-    data_dir='/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1',
+    data_dir='/proj/diffusion-inbetweening/data',
     batch_size=1,
     window=50,
     offset=20
@@ -48,7 +49,7 @@ data_module = Lafan1DataModule(
 data_module.setup(stage='test')
 
 # Get a single sample from the test dataset
-sample_index = 0  # Adjust this index as needed
+sample_index = 1  # Adjust this index as needed
 test_dataset = data_module.test_dataset
 sample = test_dataset[sample_index]
 sample = {key: value.to(model.device) for key, value in sample.items()}
@@ -56,14 +57,22 @@ sample = {key: value.to(model.device) for key, value in sample.items()}
 # ATTENTION! For generating the BVH take into account that the X is local (except the root), and the Q is global.
 denoised_X, denoised_Q = model.generate_samples(sample['X'], sample['Q'])
 print('Inbetweening finished!')
-print("ORIGINAL SAMPLE: ", denoised_X[22:27,0,:])
-print("DENOISED SAMPLE: ", sample['X'][22:27,0,:])
+print("ORIGINAL SAMPLE X: ", sample['X'][22:27,0,:])
+print("DENOISED SAMPLE X: ", denoised_X[22:27,0,:])
 
+print("ORIGINAL SAMPLE Q: ", sample['Q'][22:27,0,:])
+print("DENOISED SAMPLE Q: ", denoised_Q[22:27,0,:])
+
+# Plot the 3D skeleton
 X_gt_global = compute_global_positions_in_a_sample(sample['X'], sample['Q'], sample['parents'])
 X_denoised_global = compute_global_positions_in_a_sample(denoised_X, denoised_Q, sample['parents'])
+# plot_3d_skeleton_with_lines(torch.tensor(X_gt_global).unsqueeze(0), sample['parents'], sequence_index=0, frames_range=(24, 25))
+# plot_3d_skeleton_with_lines(torch.tensor(X_denoised_global).unsqueeze(0), sample['parents'], sequence_index=0, frames_range=(24, 25))
 
-plot_3d_skeleton_with_lines(torch.tensor(X_gt_global).unsqueeze(0), sample['parents'], sequence_index=0, frames_range=(24, 25))
-plot_3d_skeleton_with_lines(torch.tensor(X_denoised_global).unsqueeze(0), sample['parents'], sequence_index=0, frames_range=(24, 25))
+# Plot the root's path
+plot_root(sample['X'].unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
+plot_root(denoised_X.unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
 
-# plot_root(sample['X'].unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
-# plot_root(denoised_X.unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
+# Generate BVH files
+write_bvh('output_original.bvh', X=sample['X'], Q_global=sample['Q'], parents=sample['parents'])
+write_bvh('output_denoised.bvh', X=denoised_X, Q_global=denoised_Q, parents=sample['parents'])

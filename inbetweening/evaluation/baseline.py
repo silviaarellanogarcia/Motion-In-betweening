@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from inbetweening.data_processing.process_data import Lafan1Dataset
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
@@ -50,20 +51,20 @@ def interpolate_quaternions(Q, start_frame, target_frame, num_gap_frames):
         gap_frames = range(start_frame + 1, target_frame)
         # Replace the missing frames in Q with the interpolated quaternions
         for idx, frame in enumerate(gap_frames):
-            Q[frame, joint] = interpolated_rots[idx].as_quat()
+            Q[frame, joint] = torch.from_numpy(interpolated_rots[idx].as_quat())
 
     return Q
 
 
 if __name__ == "__main__":
-    bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"  # Update this with the actual path
+    bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data_walking"  # Update this with the actual path
     dataset = Lafan1Dataset(bvh_path, window=50, offset=20, train=True)
 
     # Test by retrieving a sample from the dataset
     sample_idx = 0  # Test with the first sample
     sample = dataset[sample_idx]
     
-    write_bvh('output_walk_gt2.bvh', sample['X'], sample['Q'], sample['parents'])
+    write_bvh('output_walk_gt2.bvh', sample['X'], sample['parents'], Q_global=sample['Q'])
 
     past_context_seq = sample['X'][:10, :, :]
     target_sample = sample['X'][15, :, :]
@@ -72,4 +73,4 @@ if __name__ == "__main__":
     interpolated_X = interpolate_position(past_context_seq, target_sample, num_gap_frames)
     interpolated_Q = interpolate_quaternions(sample['Q'], 9, 15, 5)
 
-    write_bvh('output_walk_int2.bvh', interpolated_X, interpolated_Q[:16, :, :], sample['parents'])
+    write_bvh('output_walk_int2.bvh', interpolated_X, sample['parents'], Q_global=interpolated_Q[:16, :, :])
