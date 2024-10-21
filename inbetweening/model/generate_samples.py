@@ -26,7 +26,7 @@ n_joints = config['model']['n_joints']
 down_channels = config['model']['down_channels']
 
 model = DiffusionModel.load_from_checkpoint(
-    '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init/version_24/checkpoints/epoch=617-step=148938.ckpt',
+    '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init/version_25/checkpoints/epoch=480-step=115921.ckpt',
     beta_start=beta_start,
     beta_end=beta_end,
     n_diffusion_timesteps=n_diffusion_timesteps,
@@ -70,8 +70,8 @@ X_denoised_global = compute_global_positions_in_a_sample(denoised_X, denoised_Q,
 # plot_3d_skeleton_with_lines(torch.tensor(X_denoised_global).unsqueeze(0), sample['parents'], sequence_index=0, frames_range=(24, 25))
 
 # Plot the root's path
-plot_root(sample['X'].unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
-plot_root(denoised_X.unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
+# plot_root(sample['X'].unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
+# plot_root(denoised_X.unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
 
 # Generate BVH files
 write_bvh('output_original.bvh', X=sample['X'], Q_global=sample['Q'], parents=sample['parents'])

@@ -106,9 +106,6 @@ class DiffusionModel(pl.LightningModule):
 
         noisy_Q_0 = Q_0.clone()
         noisy_Q_0[:, masked_frames, :, :] = (sqrt_alphas_cumprod_t_Q.to(self.device) * Q_0.to(self.device) + sqrt_one_minus_alphas_cumprod_t_Q.to(self.device) * noise_Q.to(self.device))[:, masked_frames, :, :].float()
-
-        # Normalize the quaternions to ensure they are valid unit quaternions
-        noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
         
         return noisy_X_0, noisy_Q_0, noise_X, noise_Q
     
@@ -257,6 +254,9 @@ class DiffusionModel(pl.LightningModule):
         print("Denoised sequences X:", noisy_X_0[:, :, 0, :])
         print("Denoised sequences Q:", noisy_Q_0.shape)
 
+        # Normalize the quaternions to ensure they are valid unit quaternions
+        noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1) ## TODO: Check that the samples that weren't modified remain the same
+
         return noisy_X_0[0], noisy_Q_0[0]
 
 
@@ -289,7 +289,8 @@ if __name__ == "__main__":
                  trainer_defaults={
                      'logger': logger_config,
                      'callbacks': [checkpoint_callback],
+                    #  'overfit_batches': 1 ## TODO: AT SOME POINT REMOVE THE OVERFITTING
     })
 
-    ## COMMAND: python diffusion.py fit --config ./default_config.yaml
+    ## COMMAND: python diffusion.py fit --config ./config.yaml
     ## For continue training from a checkpoint: python diffusion.py fit --config ./default_config.yaml --ckpt_path PATH

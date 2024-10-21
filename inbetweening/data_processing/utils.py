@@ -116,8 +116,8 @@ def compute_global_positions_in_a_sample(X, Q, parents):
     X_global = np.zeros((n_frames, n_joints, pos_dims))  # Initialize global positions
 
     if isinstance(X, torch.Tensor):
-        X = X.detach().numpy()
-        Q = Q.detach().numpy()
+        X = X.detach().cpu().numpy()
+        Q = Q.detach().cpu().numpy()
 
     for frame in range(n_frames):
         for joint in range(n_joints):

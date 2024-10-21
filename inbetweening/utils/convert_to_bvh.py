@@ -75,13 +75,13 @@ def write_bvh(filename, X, parents, Q_global=None, Q_local=None, frame_time=1.0 
     elif Q_local != None:
         Q = Q_local
     elif Q_global != None:
-        Q = quat_ik_Q(Q_global.detach().numpy(), parents)
+        Q = quat_ik_Q(Q_global.detach().cpu().numpy(), parents.cpu())
 
     with open(filename, 'w') as f:
         # Write the HIERARCHY section
-        write_hierarchy(f, X, parents)
+        write_hierarchy(f, X.cpu(), parents.cpu())
         
         # Write the MOTION section
-        write_motion(f, X, Q, parents, frame_time)
+        write_motion(f, X.cpu(), Q, parents.cpu(), frame_time)
 
     print("BVH saved!")
