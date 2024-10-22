@@ -9,8 +9,11 @@ from inbetweening.utils.aux_functions import plot_3d_skeleton_with_lines, plot_r
 from inbetweening.data_processing.utils import compute_global_positions_in_a_sample
 from inbetweening.utils.convert_to_bvh import write_bvh
 
+path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init/version_38/checkpoints/epoch=741-step=178822.ckpt'
+config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init/version_38/config.yaml'
+
 # Load the config file
-with open('config.yaml', 'r') as f:
+with open(config_file_corresponding_to_ckpt, 'r') as f:
     config = yaml.safe_load(f)
 
 # Prepare all the hyperparameters that are necessary for the model
@@ -26,7 +29,7 @@ n_joints = config['model']['n_joints']
 down_channels = config['model']['down_channels']
 
 model = DiffusionModel.load_from_checkpoint(
-    '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init/version_25/checkpoints/epoch=480-step=115921.ckpt',
+    path_to_checkpoint,
     beta_start=beta_start,
     beta_end=beta_end,
     n_diffusion_timesteps=n_diffusion_timesteps,

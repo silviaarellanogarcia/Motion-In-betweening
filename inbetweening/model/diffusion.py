@@ -17,7 +17,10 @@ def get_scheduler(schedule_name, n_diffusion_timesteps, beta_start, beta_end):
     Define a noise scheduler
     """
     if schedule_name == 'linear':
-        return torch.linspace(beta_start, beta_end, n_diffusion_timesteps, dtype=torch.float64)
+        scale = 1000 / n_diffusion_timesteps
+        new_beta_start = scale * 0.0001 ### TODO: Check if this works and if it does, adjust the parameters passed
+        new_beta_end = scale * 0.02
+        return torch.linspace(new_beta_start, new_beta_end, n_diffusion_timesteps, dtype=torch.float64)
     else:
         raise NotImplementedError(f"The scheduler: {schedule_name} is not implemented. Try to use linear")
     
@@ -201,8 +204,8 @@ class DiffusionModel(pl.LightningModule):
         total_loss = ((1/X_0.shape[2] * loss_X) + loss_Q) / X_0.shape[0]
         
         # Log loss
-        self.log('train_loss_X', loss_X, prog_bar=True, on_step=True)
-        self.log('train_loss_Q', loss_Q, prog_bar=True, on_step=True)
+        self.log('train_loss_X', loss_X/X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
+        self.log('train_loss_Q', loss_Q/X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
         self.log('train_total_loss', total_loss, prog_bar=True, on_step=True)
 
         return total_loss
@@ -221,8 +224,8 @@ class DiffusionModel(pl.LightningModule):
         total_loss = (loss_X + loss_Q) / X_0.shape[0]
         
         # Log loss
-        self.log('validation_loss_X', loss_X, prog_bar=True, on_step=True)
-        self.log('validation_loss_Q', loss_Q, prog_bar=True, on_step=True)
+        self.log('validation_loss_X', loss_X / X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
+        self.log('validation_loss_Q', loss_Q / X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
         self.log('validation_total_loss', total_loss, prog_bar=True, on_step=True)
 
         return total_loss
@@ -251,8 +254,8 @@ class DiffusionModel(pl.LightningModule):
             noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
 
         # These two lines are temporary. TODO: Substitute with something more meaningful like generating the BVH
-        print("Denoised sequences X:", noisy_X_0[:, :, 0, :])
-        print("Denoised sequences Q:", noisy_Q_0.shape)
+        # print("Denoised sequences X:", noisy_X_0[:, :, 0, :])
+        # print("Denoised sequences Q:", noisy_Q_0.shape)
 
         # Normalize the quaternions to ensure they are valid unit quaternions
         noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1) ## TODO: Check that the samples that weren't modified remain the same
@@ -261,7 +264,7 @@ class DiffusionModel(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.99)
         return [optimizer], [scheduler]
 
@@ -289,7 +292,7 @@ if __name__ == "__main__":
                  trainer_defaults={
                      'logger': logger_config,
                      'callbacks': [checkpoint_callback],
-                    #  'overfit_batches': 1 ## TODO: AT SOME POINT REMOVE THE OVERFITTING
+                    #   'overfit_batches': 5 ## TODO: AT SOME POINT REMOVE THE OVERFITTING
     })
 
     ## COMMAND: python diffusion.py fit --config ./config.yaml
