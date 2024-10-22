@@ -5,7 +5,7 @@ import pytorch_lightning as pl
 import yaml
 
 from inbetweening.data_processing.process_data import Lafan1DataModule, Lafan1Dataset
-from inbetweening.model.unet import SimpleUnet
+from inbetweening.model.unet3d import SimpleUnet
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.cli import LightningCLI
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -17,10 +17,7 @@ def get_scheduler(schedule_name, n_diffusion_timesteps, beta_start, beta_end):
     Define a noise scheduler
     """
     if schedule_name == 'linear':
-        scale = 1000 / n_diffusion_timesteps
-        new_beta_start = scale * 0.0001 ### TODO: Check if this works and if it does, adjust the parameters passed
-        new_beta_end = scale * 0.02
-        return torch.linspace(new_beta_start, new_beta_end, n_diffusion_timesteps, dtype=torch.float64)
+        return torch.linspace(beta_start, beta_end, n_diffusion_timesteps, dtype=torch.float64)
     else:
         raise NotImplementedError(f"The scheduler: {schedule_name} is not implemented. Try to use linear")
     
@@ -54,7 +51,7 @@ class DiffusionModel(pl.LightningModule):
         self.sqrt_recip_alphas = torch.sqrt(1.0 / alphas)
         self.posterior_variance = betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
 
-        self.model = SimpleUnet(time_emb_dim, window, n_joints, down_channels)
+        self.model = SimpleUnet(time_emb_dim, down_channels)
         self.lr = lr
         self.window = window
         self.n_joints = n_joints
@@ -109,7 +106,7 @@ class DiffusionModel(pl.LightningModule):
 
         noisy_Q_0 = Q_0.clone()
         noisy_Q_0[:, masked_frames, :, :] = (sqrt_alphas_cumprod_t_Q.to(self.device) * Q_0.to(self.device) + sqrt_one_minus_alphas_cumprod_t_Q.to(self.device) * noise_Q.to(self.device))[:, masked_frames, :, :].float()
-        
+
         return noisy_X_0, noisy_Q_0, noise_X, noise_Q
     
     def sample_timestep(self, noisy_X, noisy_Q, t):
@@ -122,8 +119,8 @@ class DiffusionModel(pl.LightningModule):
         sqrt_recip_alphas_t = get_index_from_list(self.sqrt_recip_alphas, t, noisy_X.shape)
 
         noise_pred = self.model(noisy_X, noisy_Q, t) ### I will have X and Q together and I have to separate them.
-        noise_X_pred = noise_pred[:, :, :3] # torch.Size([1, 1100, 3])
-        noise_Q_pred = noise_pred[:, :, 3:] # torch.Size([1, 1100, 4])
+        noise_X_pred = noise_pred[:, 0, :, :, :3] # torch.Size([1, 1100, 3])
+        noise_Q_pred = noise_pred[:, 1, :, :, :] # torch.Size([1, 1100, 4])
 
         # Convert back to the shape (1, 50, 22, 3) --> TODO: BE CAREFUL!
         batch_size = t.shape[0]
@@ -158,17 +155,13 @@ class DiffusionModel(pl.LightningModule):
         noisy_X_0, noisy_Q_0, noise_X, noise_Q = self.forward_diffusion_sample(X_0, Q_0, t, masked_frames)
         
         # Predict noise for both positional and quaternion data
+        ###noise_pred = model(noisy_X_0, noisy_Q_0, t) ## TODO: Change back when I fix the Unet
         noise_pred = model(noisy_X_0, noisy_Q_0, t)
 
         # Reshape the noise so that it has the same structure as the noise prediction.
-        batch_size, frames, joints, position_dims = noise_X.shape
-        noise_X = noise_X.view(batch_size, frames * joints, position_dims)
-
+        batch_size, frames, joints, pos_dims = noise_X.shape
         batch_size, frames, joints, quaternion_dims = noise_Q.shape
-        noise_Q = noise_Q.view(batch_size, frames * joints, quaternion_dims)
 
-        # Concatenate the channels dimensions to consider X and Q at the same time
-        noise_X_and_Q = torch.cat((noise_X, noise_Q), dim=2)
         
         # Create a tensor for the masked frames and the joints
         masked_frames_tensor = torch.tensor(masked_frames).view(-1, 1)
@@ -185,8 +178,8 @@ class DiffusionModel(pl.LightningModule):
         masked_elements_Q = incremented_elements.flatten()
 
         # Calculate the loss
-        loss_X = F.mse_loss(noise_X_and_Q[:, masked_elements_X, :3], noise_pred[:, masked_elements_X, :3], reduction='sum')
-        loss_Q = F.mse_loss(noise_X_and_Q[:, masked_elements_Q, 3:], noise_pred[:, masked_elements_Q, 3:], reduction='sum')
+        loss_X = F.mse_loss(noise_X[:, masked_frames, :, :], noise_pred[:, 0, masked_frames, :, :3], reduction='sum')
+        loss_Q = F.mse_loss(noise_Q[:, masked_frames, :, :], noise_pred[:, 1, masked_frames, :], reduction='sum')
         
         return loss_X, loss_Q
     
@@ -204,8 +197,8 @@ class DiffusionModel(pl.LightningModule):
         total_loss = ((1/X_0.shape[2] * loss_X) + loss_Q) / X_0.shape[0]
         
         # Log loss
-        self.log('train_loss_X', loss_X/X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
-        self.log('train_loss_Q', loss_Q/X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
+        self.log('train_loss_X', loss_X, prog_bar=True, on_step=True)
+        self.log('train_loss_Q', loss_Q, prog_bar=True, on_step=True)
         self.log('train_total_loss', total_loss, prog_bar=True, on_step=True)
 
         return total_loss
@@ -224,8 +217,8 @@ class DiffusionModel(pl.LightningModule):
         total_loss = (loss_X + loss_Q) / X_0.shape[0]
         
         # Log loss
-        self.log('validation_loss_X', loss_X / X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
-        self.log('validation_loss_Q', loss_Q / X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
+        self.log('validation_loss_X', loss_X, prog_bar=True, on_step=True)
+        self.log('validation_loss_Q', loss_Q, prog_bar=True, on_step=True)
         self.log('validation_total_loss', total_loss, prog_bar=True, on_step=True)
 
         return total_loss
@@ -254,17 +247,16 @@ class DiffusionModel(pl.LightningModule):
             noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
 
         # These two lines are temporary. TODO: Substitute with something more meaningful like generating the BVH
-        # print("Denoised sequences X:", noisy_X_0[:, :, 0, :])
-        # print("Denoised sequences Q:", noisy_Q_0.shape)
-
-        # Normalize the quaternions to ensure they are valid unit quaternions
-        noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1) ## TODO: Check that the samples that weren't modified remain the same
+        #### TODO: Normalize Q here.
+        noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1) ## TODO: If not, try to only normalliz
+        print("Denoised sequences X:", noisy_X_0[:, :, 0, :])
+        print("Denoised sequences Q:", noisy_Q_0.shape)
 
         return noisy_X_0[0], noisy_Q_0[0]
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.99)
         return [optimizer], [scheduler]
 
@@ -292,8 +284,7 @@ if __name__ == "__main__":
                  trainer_defaults={
                      'logger': logger_config,
                      'callbacks': [checkpoint_callback],
-                    #   'overfit_batches': 5 ## TODO: AT SOME POINT REMOVE THE OVERFITTING
     })
 
-    ## COMMAND: python diffusion.py fit --config ./config.yaml
+    ## COMMAND: python diffusion.py fit --config ./default_config.yaml
     ## For continue training from a checkpoint: python diffusion.py fit --config ./default_config.yaml --ckpt_path PATH
