@@ -122,8 +122,11 @@ class DiffusionModel(pl.LightningModule):
         sqrt_recip_alphas_t = get_index_from_list(self.sqrt_recip_alphas, t, noisy_X.shape)
 
         noise_pred = self.model(noisy_X, noisy_Q, t) ### I will have X and Q together and I have to separate them.
-        noise_X_pred = noise_pred[:, :, :3] # torch.Size([1, 1100, 3])
-        noise_Q_pred = noise_pred[:, :, 3:] # torch.Size([1, 1100, 4])
+        noise_X_pred = noise_pred[:, :3, :] # torch.Size([1, 1100, 3])
+        noise_Q_pred = noise_pred[:, 3:, :] # torch.Size([1, 1100, 4])
+
+        noise_X_pred = torch.permute(noise_X_pred, (0,2,1))
+        noise_Q_pred = torch.permute(noise_Q_pred, (0,2,1))
 
         # Convert back to the shape (1, 50, 22, 3) --> TODO: BE CAREFUL!
         batch_size = t.shape[0]
@@ -131,7 +134,7 @@ class DiffusionModel(pl.LightningModule):
         noise_Q_pred = noise_Q_pred.view(batch_size, self.window, self.n_joints, 4)
 
         # Call model (current image - noise prediction)
-        model_mean_X = sqrt_recip_alphas_t * (noisy_X - betas_t * noise_X_pred / sqrt_one_minus_alphas_cumprod_t) ## noise_X_pred refers to the "z" in the equation
+        model_mean_X = sqrt_recip_alphas_t * (noisy_X - betas_t * noise_X_pred / sqrt_one_minus_alphas_cumprod_t) ## This corresponds to eq. 11
         model_mean_Q = sqrt_recip_alphas_t * (noisy_Q - betas_t * noise_Q_pred / sqrt_one_minus_alphas_cumprod_t)
 
         posterior_variance_t = get_index_from_list(self.posterior_variance, t, noisy_X.shape)
@@ -142,7 +145,7 @@ class DiffusionModel(pl.LightningModule):
             return model_mean_X, model_mean_Q
         else:
             ## These X and Q minus one contain everything, but I should only keep the part that corresponds to the gap, and concatenate that to the original motion.
-            X_minus_one = model_mean_X + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_X) 
+            X_minus_one = model_mean_X + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_X) ## Equation 4 in algorihm 2
             Q_minus_one = model_mean_Q + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_Q) 
             ### TODO: Maybe it's better to predict the clean motion instead of the noise (predict x_{0} directly, not x_{t-1})
 
@@ -159,6 +162,7 @@ class DiffusionModel(pl.LightningModule):
         
         # Predict noise for both positional and quaternion data
         noise_pred = model(noisy_X_0, noisy_Q_0, t)
+        noise_pred = torch.permute(noise_pred, (0,2,1))
 
         # Reshape the noise so that it has the same structure as the noise prediction.
         batch_size, frames, joints, position_dims = noise_X.shape

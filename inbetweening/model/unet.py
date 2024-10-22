@@ -71,26 +71,28 @@ class SimpleUnet(nn.Module):
             )
         
         # Initial projection
-        self.conv0 = nn.Conv1d(in_channels=frames_per_joints, out_channels=self.down_channels[0], kernel_size=3, padding=1)
+        self.conv0 = nn.Conv1d(in_channels=7, out_channels=self.down_channels[0], kernel_size=3, padding=1) ## TODO: HARDCODED IN_CHANNELS
 
         # Downsample
         self.downs = nn.ModuleList([Block(self.down_channels[i], self.down_channels[i+1], time_emb_dim, up=False) for i in range(len(self.down_channels)-1)])
         # Upsample
         self.ups = nn.ModuleList([Block(self.up_channels[i], self.up_channels[i+1], time_emb_dim, up=True) for i in range(len(self.up_channels)-1)])
         
-        self.output = nn.Conv1d(self.up_channels[-1], frames_per_joints, 1)
+        self.output = nn.Conv1d(self.up_channels[-1], 7, 1) ## TODO: HARDCODED IN_CHANNELS
 
     def forward(self, X, Q, timestep):
         # Embed time
         t = self.time_mlp(timestep)
 
-        batch_size, frames, joints, quaternion_dims = X.shape
-        X = X.view(batch_size, frames * joints, quaternion_dims)
+        batch_size, frames, joints, pos_dims = X.shape
+        X = X.view(batch_size, frames * joints, pos_dims)
         batch_size, frames, joints, quaternion_dims = Q.shape
         Q = Q.view(batch_size, frames * joints, quaternion_dims) 
 
         # Concatenate the channels dimensions to be able to pass to the network X and Q at the same time
         X_and_Q = torch.cat((X, Q), dim=2)
+
+        X_and_Q = torch.permute(X_and_Q, (0,2,1))
 
         # Initial conv and safety check
         X_and_Q = self.conv0(X_and_Q.float())
