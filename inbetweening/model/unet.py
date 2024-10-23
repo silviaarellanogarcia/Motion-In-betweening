@@ -8,30 +8,34 @@ import torch
 class Block(nn.Module):
     def __init__(self, in_ch, out_ch, time_emb_dim, up=False):
         super().__init__()
-        self.time_mlp =  nn.Linear(time_emb_dim, out_ch)
+        self.time_mlp = nn.Linear(time_emb_dim, out_ch)  
+
         if up:
-            self.conv1 = nn.Conv1d(2*in_ch, out_ch, 3, padding=1)
-            self.transform = nn.ConvTranspose1d(out_ch, out_ch, 3, 1, 1)
+            self.conv1 = nn.Conv1d(2 * in_ch, out_ch, 3, padding=1)
+            # Use ConvTranspose1d for upsampling (increasing sequence length)
+            self.transform = nn.ConvTranspose1d(out_ch, out_ch, kernel_size=4, stride=2, padding=1)
         else:
             self.conv1 = nn.Conv1d(in_ch, out_ch, 3, padding=1)
-            self.transform = nn.Conv1d(out_ch, out_ch, 3, 1, 1)
+            # Use MaxPool1d for downsampling (reducing sequence length)
+            self.transform = nn.MaxPool1d(2)
+        
         self.conv2 = nn.Conv1d(out_ch, out_ch, 3, padding=1)
         self.bnorm1 = nn.BatchNorm1d(out_ch)
         self.bnorm2 = nn.BatchNorm1d(out_ch)
-        self.relu  = nn.ReLU()
+        self.relu = nn.ReLU()
         
-    def forward(self, x, t, ):
+    def forward(self, x, t):
         # First Conv
-        h = self.bnorm1(self.relu(self.conv1(x)))
+        h = self.bnorm1(self.relu(self.conv1(x)))   
         # Time embedding
         time_emb = self.relu(self.time_mlp(t))
         # Extend last 2 dimensions
         time_emb = time_emb[:, :, None]
-        # Add time channel
+        # Add time embedding
         h = h + time_emb
         # Second Conv
         h = self.bnorm2(self.relu(self.conv2(h)))
-        # Down or Upsample
+        # Downsample or Upsample
         return self.transform(h)
 
 
@@ -56,8 +60,6 @@ class SimpleUnet(nn.Module):
     """
     def __init__(self, time_emb_dim, window, n_joints, down_channels):
         super().__init__()
-        frames_per_joints = window * n_joints
-
         self.down_channels = down_channels # Right part of the UNet
         self.up_channels = self.down_channels[::-1] # Same channels than down_channels, but reversed
         print(self.up_channels)
@@ -106,10 +108,10 @@ class SimpleUnet(nn.Module):
         for up in self.ups:
             residual_X_and_Q = residual_inputs.pop()
 
-            if residual_X_and_Q.shape[2] > X_and_Q.shape[2]:
+            if residual_X_and_Q.shape[2] > X_and_Q.shape[2]: ### SUSPICIOUS
                 # Pad Q to match the shape of residual_Q and allow concatenation
-                pad_amount = (0, residual_X_and_Q.shape[2] - X_and_Q.shape[2]) # No padding on the left side, just the right.
-                X_and_Q = F.pad(X_and_Q, pad_amount)
+                pad_amount = max(0, residual_X_and_Q.shape[2] - X_and_Q.shape[2])
+                X_and_Q = F.pad(X_and_Q, (0, pad_amount)) # No padding on the left side, just the right side
 
             # Add residual x as additional channels
             X_and_Q = torch.cat((X_and_Q, residual_X_and_Q), dim=1)           
