@@ -1,6 +1,6 @@
 trainer:
   max_epochs: 1000
-  precision: bf16-mixed  # TODO: LOOK!! Potential source of error
+  precision: 32 # TODO: LOOK!! Potential source of error
 
 data:
   data_dir: /proj/diffusion-inbetweening/data
@@ -12,10 +12,11 @@ model:
   lr: 0.0001
   beta_start: 0.0001 
   beta_end: 0.02
-  n_diffusion_timesteps: 600
+  n_diffusion_timesteps: 1000
   gap_size: 2
   type_masking: 'continued' # Options are continued or spread
   time_emb_dim: 32
   window: *window_val
   n_joints: 22 ## Hardcoded according to the dataset
+  type_model: 'unet'
   down_channels: [16, 32, 64] ## THE NUMBER OF CHANNELS IN THE UNET SHOULD INCREASE IN THE DOWN BRANCH, AND INCREASE IN THE UP BRANCH

@@ -9,8 +9,8 @@ from inbetweening.utils.aux_functions import plot_3d_skeleton_with_lines, plot_r
 from inbetweening.data_processing.utils import compute_global_positions_in_a_sample
 from inbetweening.utils.convert_to_bvh import write_bvh
 
-path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init_2/version_7/checkpoints/epoch=278-step=17019.ckpt'
-config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_init_2/version_7/config.yaml'
+path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_mlp/version_4/checkpoints/epoch=218-step=13359.ckpt'
+config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_mlp/version_4/config.yaml'
 
 # Load the config file
 with open(config_file_corresponding_to_ckpt, 'r') as f:
@@ -27,6 +27,7 @@ time_emb_dim = config['model']['time_emb_dim']
 window = config['model']['window']
 n_joints = config['model']['n_joints']
 down_channels = config['model']['down_channels']
+type_model = config['model']['type_model']
 
 model = DiffusionModel.load_from_checkpoint(
     path_to_checkpoint,
@@ -34,12 +35,13 @@ model = DiffusionModel.load_from_checkpoint(
     beta_end=beta_end,
     n_diffusion_timesteps=n_diffusion_timesteps,
     lr=lr,
-    gap_size=gap_size,  # Use default value if not specified
-    type_masking=type_masking,  # Use default value if not specified
-    time_emb_dim=time_emb_dim,  # Use default value if not specified
-    window=window,  # Use default value if not specified
-    n_joints=n_joints,  # Use default value if not specified
-    down_channels=down_channels # Use default value if not specified
+    gap_size=gap_size,
+    type_masking=type_masking,
+    time_emb_dim=time_emb_dim,
+    window=window,
+    n_joints=n_joints,
+    down_channels=down_channels,
+    type_model=type_model
 )
 
 data_module = Lafan1DataModule(

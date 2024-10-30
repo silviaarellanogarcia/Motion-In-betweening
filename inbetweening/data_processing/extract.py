@@ -317,8 +317,6 @@ def get_lafan1_set(bvh_path, actors, window=50, offset=20):
     # plot_3d_skeleton_with_lines(X_global_new, anim.parents, sequence_index=0, frames_range=(0, 2))
     # plot_root(X_global_new[:, :, 0, :], start_frame=0, end_frame=49, sequence_index=0)
 
-    ## TODO: Ask if I should rotate the global too!!
-
     return X, Q, X_global_new, Q_global_new, anim.parents, contacts_l, contacts_r, index_map
 
 
