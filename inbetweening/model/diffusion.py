@@ -5,6 +5,7 @@ import pytorch_lightning as pl
 import yaml
 
 from inbetweening.data_processing.process_data import Lafan1DataModule, Lafan1Dataset
+from inbetweening.model.mlp import SimpleMLP
 from inbetweening.model.unet import SimpleUnet
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.cli import LightningCLI
@@ -38,7 +39,7 @@ def get_index_from_list(vals, t, x_shape):
 
 
 class DiffusionModel(pl.LightningModule):
-    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int]):
+    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str, kernel_size: int):
         super().__init__() # Initialize the parent's class before initializing any child
 
         # Get beta scheduler
@@ -54,7 +55,15 @@ class DiffusionModel(pl.LightningModule):
         self.sqrt_recip_alphas = torch.sqrt(1.0 / alphas)
         self.posterior_variance = betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
 
-        self.model = SimpleUnet(time_emb_dim, window, n_joints, down_channels)
+        self.type_model = type_model
+        
+        self.kernel_size = kernel_size
+
+        if type_model == 'unet':
+            self.model = SimpleUnet(time_emb_dim, window, n_joints, down_channels, kernel_size)
+        else:
+            ## In this case down_channels refers to the hidden dimensions
+            self.model = SimpleMLP(time_emb_dim, window, n_joints, down_channels)
         self.lr = lr
         self.window = window
         self.n_joints = n_joints
@@ -122,8 +131,11 @@ class DiffusionModel(pl.LightningModule):
         sqrt_recip_alphas_t = get_index_from_list(self.sqrt_recip_alphas, t, noisy_X.shape)
 
         noise_pred = self.model(noisy_X, noisy_Q, t) ### I will have X and Q together and I have to separate them.
-        noise_X_pred = noise_pred[:, :, :3] # torch.Size([1, 1100, 3])
-        noise_Q_pred = noise_pred[:, :, 3:] # torch.Size([1, 1100, 4])
+        noise_X_pred = noise_pred[:, :(self.n_joints * 3), :]
+        noise_Q_pred = noise_pred[:, (self.n_joints * 3):, :]
+
+        noise_X_pred = torch.permute(noise_X_pred, (0,2,1))
+        noise_Q_pred = torch.permute(noise_Q_pred, (0,2,1))
 
         # Convert back to the shape (1, 50, 22, 3) --> TODO: BE CAREFUL!
         batch_size = t.shape[0]
@@ -131,7 +143,7 @@ class DiffusionModel(pl.LightningModule):
         noise_Q_pred = noise_Q_pred.view(batch_size, self.window, self.n_joints, 4)
 
         # Call model (current image - noise prediction)
-        model_mean_X = sqrt_recip_alphas_t * (noisy_X - betas_t * noise_X_pred / sqrt_one_minus_alphas_cumprod_t) ## noise_X_pred refers to the "z" in the equation
+        model_mean_X = sqrt_recip_alphas_t * (noisy_X - betas_t * noise_X_pred / sqrt_one_minus_alphas_cumprod_t) ## This corresponds to eq. 11
         model_mean_Q = sqrt_recip_alphas_t * (noisy_Q - betas_t * noise_Q_pred / sqrt_one_minus_alphas_cumprod_t)
 
         posterior_variance_t = get_index_from_list(self.posterior_variance, t, noisy_X.shape)
@@ -142,12 +154,10 @@ class DiffusionModel(pl.LightningModule):
             return model_mean_X, model_mean_Q
         else:
             ## These X and Q minus one contain everything, but I should only keep the part that corresponds to the gap, and concatenate that to the original motion.
-            X_minus_one = model_mean_X + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_X) 
+            X_minus_one = model_mean_X + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_X) ## Equation 4 in algorihm 2
             Q_minus_one = model_mean_Q + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_Q) 
             ### TODO: Maybe it's better to predict the clean motion instead of the noise (predict x_{0} directly, not x_{t-1})
 
-            ## Current X_minus_one and Q_minus_one contain all the frames. In the training step I should only keep the ones that correspond to the gap and 
-            ## incorporate these into the complete sequence.
             return X_minus_one, Q_minus_one
     
     
@@ -162,31 +172,22 @@ class DiffusionModel(pl.LightningModule):
 
         # Reshape the noise so that it has the same structure as the noise prediction.
         batch_size, frames, joints, position_dims = noise_X.shape
-        noise_X = noise_X.view(batch_size, frames * joints, position_dims)
+        noise_X = noise_X.view(batch_size, frames, joints * position_dims)
 
         batch_size, frames, joints, quaternion_dims = noise_Q.shape
-        noise_Q = noise_Q.view(batch_size, frames * joints, quaternion_dims)
+        noise_Q = noise_Q.view(batch_size, frames, joints * quaternion_dims)
 
         # Concatenate the channels dimensions to consider X and Q at the same time
         noise_X_and_Q = torch.cat((noise_X, noise_Q), dim=2)
+        noise_X_and_Q = torch.permute(noise_X_and_Q, (0,2,1))
         
-        # Create a tensor for the masked frames and the joints
+        # Create a tensor for the masked frames
         masked_frames_tensor = torch.tensor(masked_frames).view(-1, 1)
-
-        # Compute which are the masked joints
-        ## Masking of X
         masked_frames_tensor = masked_frames_tensor.view(-1)
-        masked_elements_X = masked_frames_tensor * joints + 0 ## Plus 0 because I only consider the root, not other joints
-
-        ## Masking of Q
-        # Find the index of the row corresponding to all joints that need to be masked (frame to frame + joints - 1)
-        incremental_numbers = torch.arange(0, joints)
-        incremented_elements = masked_elements_X.unsqueeze(1) + incremental_numbers
-        masked_elements_Q = incremented_elements.flatten()
 
         # Calculate the loss
-        loss_X = F.mse_loss(noise_X_and_Q[:, masked_elements_X, :3], noise_pred[:, masked_elements_X, :3], reduction='sum')
-        loss_Q = F.mse_loss(noise_X_and_Q[:, masked_elements_Q, 3:], noise_pred[:, masked_elements_Q, 3:], reduction='sum')
+        loss_X = F.mse_loss(noise_X_and_Q[:, :(joints * 3), masked_frames_tensor], noise_pred[:, :(joints * 3), masked_frames_tensor], reduction='sum')
+        loss_Q = F.mse_loss(noise_X_and_Q[:, (joints * 3):, masked_frames_tensor], noise_pred[:, (joints * 3):, masked_frames_tensor], reduction='sum')
         
         return loss_X, loss_Q
     
@@ -221,7 +222,7 @@ class DiffusionModel(pl.LightningModule):
 
         # Calculate loss
         loss_X, loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)
-        total_loss = (loss_X + loss_Q) / X_0.shape[0]
+        total_loss = ((1/X_0.shape[2] * loss_X) + loss_Q) / X_0.shape[0]
         
         # Log loss
         self.log('validation_loss_X', loss_X / X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
@@ -231,34 +232,36 @@ class DiffusionModel(pl.LightningModule):
         return total_loss
     
     def generate_samples(self, X_0, Q_0):
-        X_0 = X_0.unsqueeze(0) ## This adds the batch dimension
-        Q_0 = Q_0.unsqueeze(0) ## This adds the batch dimension
+        self.eval()
+        with torch.no_grad():
+            X_0 = X_0.unsqueeze(0) ## This adds the batch dimension
+            Q_0 = Q_0.unsqueeze(0) ## This adds the batch dimension
 
-        t = torch.full((X_0.shape[0],), self.n_diffusion_timesteps - 1, device=self.device).long()
+            t = torch.full((X_0.shape[0],), self.n_diffusion_timesteps - 1, device=self.device).long()
 
-        # Masking
-        masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
+            # Masking
+            masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
-        # Calculate loss
-        noisy_X_0, noisy_Q_0, _, _ = self.forward_diffusion_sample(X_0, Q_0, t, masked_frames)
+            # Calculate loss
+            noisy_X_0, noisy_Q_0, _, _ = self.forward_diffusion_sample(X_0, Q_0, t, masked_frames)
 
-        for step in reversed(range(self.n_diffusion_timesteps)):
-            t_step = torch.tensor([step], device=self.device).long()
+            for step in reversed(range(self.n_diffusion_timesteps)):
+                t_step = torch.tensor([step], device=self.device).long()
 
-            # Denoise positions and quaternions
-            denoised_X_complete_seq, denoised_Q_complete_seq = self.sample_timestep(noisy_X_0, noisy_Q_0, t_step)
-            noisy_X_0[:, masked_frames, :, :] = denoised_X_complete_seq[:, masked_frames, :, :].float()
-            noisy_Q_0[:, masked_frames, :, :] = denoised_Q_complete_seq[:, masked_frames, :, :].float()
+                # Denoise positions and quaternions
+                denoised_X_complete_seq, denoised_Q_complete_seq = self.sample_timestep(noisy_X_0, noisy_Q_0, t_step)
+                noisy_X_0[:, masked_frames, :, :] = denoised_X_complete_seq[:, masked_frames, :, :].float()
+                noisy_Q_0[:, masked_frames, :, :] = denoised_Q_complete_seq[:, masked_frames, :, :].float()
 
-            # Normalize quaternions to ensure they remain valid unit quaternions
-            noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
+                # Normalize quaternions to ensure they remain valid unit quaternions
+                noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
 
-        # These two lines are temporary. TODO: Substitute with something more meaningful like generating the BVH
-        # print("Denoised sequences X:", noisy_X_0[:, :, 0, :])
-        # print("Denoised sequences Q:", noisy_Q_0.shape)
+            # These two lines are temporary. TODO: Substitute with something more meaningful like generating the BVH
+            # print("Denoised sequences X:", noisy_X_0[:, :, 0, :])
+            # print("Denoised sequences Q:", noisy_Q_0.shape)
 
-        # Normalize the quaternions to ensure they are valid unit quaternions
-        noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1) ## TODO: Check that the samples that weren't modified remain the same
+            # Normalize the quaternions to ensure they are valid unit quaternions
+            noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1) ## TODO: Check that the samples that weren't modified remain the same
 
         return noisy_X_0[0], noisy_Q_0[0]
 
@@ -275,7 +278,7 @@ if __name__ == "__main__":
         'class_path': 'pytorch_lightning.loggers.TensorBoardLogger',
         'init_args': {                      # Use init_args instead of params
             'save_dir': 'lightning_logs',
-            'name': 'my_model_init',
+            'name': 'my_model_correct_dims',
             'version': None
         }
     }

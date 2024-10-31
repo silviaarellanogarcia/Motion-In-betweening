@@ -1,14 +1,15 @@
 import pickle
 import os
 import torch
-from torch.utils.data import DataLoader, Dataset
 import pytorch_lightning as pl
+import numpy as np
+from torch.utils.data import DataLoader, Dataset
 from inbetweening.data_processing.extract import get_lafan1_set
 
 class Lafan1Dataset(Dataset):
     """LAFAN1 Dataset class."""
 
-    def __init__(self, data_dir: str, window: int, offset: int, train: bool=True, val: bool=False):
+    def __init__(self, data_dir: str, window: int, offset: int, train: bool=True, val: bool=False, test: bool=False):
         """
         Args:
             data_dir (string): Directory with the dataset.
@@ -28,31 +29,49 @@ class Lafan1Dataset(Dataset):
         self.window = window
         self.offset = offset
 
+        self.training_mean_X = None
+        self.training_std_X = None
+
+        self.actors_train = ['subject1', 'subject2', 'subject3']
+        self.act_num_train = '123'
+
+        # train info:
         if train:
-            self.actors = ['subject1', 'subject2', 'subject3']
-            act_num = '123'
+            self.actors = self.actors_train
+            act_num = self.act_num_train
         elif val:
             self.actors = ['subject4'] ## TODO: This could be modified. Check if the amount of data of subject 4 is enough.
             act_num = '4'
-        else:
+        elif test:
             self.actors = ['subject5']
             act_num = '5'
         
 
-        filename = './pickle_data/lafan1_data_actors_' + act_num + '_win_' + str(self.window) + '_off_' + str(self.offset) + '.pkl'
+        # Load the corresponding data
+        filename_data = './pickle_data/lafan1_data_actors_' + act_num + '_win_' + str(self.window) + '_off_' + str(self.offset) + '.pkl'
+        self.load_or_create_data_pickle(filename_data)
 
-        if os.path.isfile(filename):
-            with open(filename, 'rb') as f:
-                self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = pickle.load(f)
-                print('Dataset loaded! (', filename, ')')
-        else:
-            # Load the dataset using the existing get_lafan1_set function --> ATTENTION! WE KEEP THE GLOBAL Q. FOR THE X WE DON'T CARE, SINCE THE ROOT IS ALWAYS GLOBAL
-            self.X, _, _, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = get_lafan1_set(self.data_dir, self.actors, self.window, self.offset) ### OJO!!!!! TODO: HE CAMBIADO ESTO PARA QUE LA X ESTÉ CENTRADA
+        # Loadd mean and std
+        filename_stats = './pickle_data/stats.pkl'
 
-            # with open(filename, 'wb') as f:
-            with open(filename, 'wb') as f:
-                pickle.dump((self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map), f)
-                print('Dataset saved as ', filename)
+        if self.training_mean_X is None or self.training_std_X is None:
+            if os.path.isfile(filename_stats):
+                with open(filename_stats, 'rb') as f:
+                    self.training_mean_X, self.training_std_X = pickle.load(f)
+            else: 
+                filename_train_data = './pickle_data/lafan1_data_actors_' + self.act_num_train + '_win_' + str(self.window) + '_off_' + str(self.offset) + '.pkl'
+                if not os.path.isfile(filename_train_data):
+                    raise FileNotFoundError(f"The training data file {filename_train_data} does not exist!")
+                with open(filename_train_data, 'rb') as f:
+                    train_X, _, _, _, _, _ = pickle.load(f) 
+                # Load training dataset and compute mean and var
+                self.training_mean_X = np.mean(train_X, axis=(0, 1))
+                self.training_std_X = np.std(train_X, axis=(0, 1))
+
+                # Save the stats
+                with open(filename_stats, 'wb') as f:
+                    pickle.dump((self.training_mean_X, self.training_std_X), f)
+
 
     def __len__(self):
         return len(self.X) ## Returns the number of sequences.
@@ -69,6 +88,12 @@ class Lafan1Dataset(Dataset):
         contacts_l = self.contacts_l[idx]
         contacts_r = self.contacts_r[idx]
 
+        assert self.training_mean_X is not None, "Mean X is not set!"
+        assert self.training_std_X is not None, "Standard deviation of X is not set!"
+
+        # Normalize the global position (-1, 1)
+        X = (X - self.training_mean_X) / (self.training_std_X + 1e-8)
+
         sample = {
             'X': torch.tensor(X, dtype=torch.float32),
             'Q': torch.tensor(Q, dtype=torch.float32),
@@ -78,6 +103,20 @@ class Lafan1Dataset(Dataset):
         }
 
         return sample
+    
+    def load_or_create_data_pickle(self, filename):
+        if os.path.isfile(filename):
+            with open(filename, 'rb') as f:
+                self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = pickle.load(f)
+                print('Dataset loaded! (', filename, ')')
+        else:
+            # Load the dataset using the existing get_lafan1_set function --> ATTENTION! WE KEEP THE GLOBAL Q. FOR THE X WE DON'T CARE, SINCE THE ROOT IS ALWAYS GLOBAL
+            self.X, _, _, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map = get_lafan1_set(self.data_dir, self.actors, self.window, self.offset)
+
+            # with open(filename, 'wb') as f:
+            with open(filename, 'wb') as f:
+                pickle.dump((self.X, self.Q, self.parents, self.contacts_l, self.contacts_r, self.index_map), f)
+                print('Dataset saved as ', filename)
     
     
 class Lafan1DataModule(pl.LightningDataModule):
@@ -126,11 +165,11 @@ class Lafan1DataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         if stage == 'fit' or stage is None:
-            self.train_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=True, val=False)
-            self.val_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=True)
+            self.train_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=True, val=False, test=False)
+            self.val_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=True, test=False)
 
         elif stage == 'test':
-            self.test_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=False)
+            self.test_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=False, test=True)
     
 if __name__ == "__main__":
     bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"  # Update this with the actual path
