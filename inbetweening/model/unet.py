@@ -60,6 +60,7 @@ class SimpleUnet(nn.Module):
     """
     def __init__(self, time_emb_dim, window, n_joints, down_channels):
         super().__init__()
+        self.n_joints = n_joints
         self.down_channels = down_channels # Right part of the UNet
         self.up_channels = self.down_channels[::-1] # Same channels than down_channels, but reversed
         print(self.up_channels)
@@ -73,23 +74,23 @@ class SimpleUnet(nn.Module):
             )
         
         # Initial projection
-        self.conv0 = nn.Conv1d(in_channels=7, out_channels=self.down_channels[0], kernel_size=3, padding=1) ## TODO: HARDCODED IN_CHANNELS
+        self.conv0 = nn.Conv1d(in_channels=n_joints*7, out_channels=self.down_channels[0], kernel_size=3, padding=1) ## TODO: HARDCODED IN_CHANNELS
 
         # Downsample
         self.downs = nn.ModuleList([Block(self.down_channels[i], self.down_channels[i+1], time_emb_dim, up=False) for i in range(len(self.down_channels)-1)])
         # Upsample
         self.ups = nn.ModuleList([Block(self.up_channels[i], self.up_channels[i+1], time_emb_dim, up=True) for i in range(len(self.up_channels)-1)])
         
-        self.output = nn.Conv1d(self.up_channels[-1], 7, 1) ## TODO: HARDCODED IN_CHANNELS
+        self.output = nn.Conv1d(self.up_channels[-1], n_joints*7, 1) ## TODO: HARDCODED IN_CHANNELS
 
     def forward(self, X, Q, timestep):
         # Embed time
         t = self.time_mlp(timestep)
 
         batch_size, frames, joints, pos_dims = X.shape
-        X = X.view(batch_size, frames * joints, pos_dims)
+        X = X.view(batch_size, frames, joints * pos_dims)
         batch_size, frames, joints, quaternion_dims = Q.shape
-        Q = Q.view(batch_size, frames * joints, quaternion_dims) 
+        Q = Q.view(batch_size, frames, joints * quaternion_dims) 
 
         # Concatenate the channels dimensions to be able to pass to the network X and Q at the same time
         X_and_Q = torch.cat((X, Q), dim=2)
@@ -108,7 +109,7 @@ class SimpleUnet(nn.Module):
         for up in self.ups:
             residual_X_and_Q = residual_inputs.pop()
 
-            if residual_X_and_Q.shape[2] > X_and_Q.shape[2]: ### SUSPICIOUS
+            if residual_X_and_Q.shape[2] > X_and_Q.shape[2]:
                 # Pad Q to match the shape of residual_Q and allow concatenation
                 pad_amount = max(0, residual_X_and_Q.shape[2] - X_and_Q.shape[2])
                 X_and_Q = F.pad(X_and_Q, (0, pad_amount)) # No padding on the left side, just the right side
@@ -118,6 +119,7 @@ class SimpleUnet(nn.Module):
             X_and_Q = up(X_and_Q, t)
 
         output = self.output(X_and_Q)
+        # output[:, :(self.n_joints * 3), :] = torch.tanh(output[:, :(self.n_joints * 3), :]) ## TODO: Check!!
         
         return output
 

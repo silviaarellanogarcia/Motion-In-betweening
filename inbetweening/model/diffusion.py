@@ -129,8 +129,8 @@ class DiffusionModel(pl.LightningModule):
         sqrt_recip_alphas_t = get_index_from_list(self.sqrt_recip_alphas, t, noisy_X.shape)
 
         noise_pred = self.model(noisy_X, noisy_Q, t) ### I will have X and Q together and I have to separate them.
-        noise_X_pred = noise_pred[:, :3, :] # torch.Size([1, 1100, 3])
-        noise_Q_pred = noise_pred[:, 3:, :] # torch.Size([1, 1100, 4])
+        noise_X_pred = noise_pred[:, :(self.n_joints * 3), :]
+        noise_Q_pred = noise_pred[:, (self.n_joints * 3):, :]
 
         noise_X_pred = torch.permute(noise_X_pred, (0,2,1))
         noise_Q_pred = torch.permute(noise_Q_pred, (0,2,1))
@@ -156,8 +156,6 @@ class DiffusionModel(pl.LightningModule):
             Q_minus_one = model_mean_Q + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_Q) 
             ### TODO: Maybe it's better to predict the clean motion instead of the noise (predict x_{0} directly, not x_{t-1})
 
-            ## Current X_minus_one and Q_minus_one contain all the frames. In the training step I should only keep the ones that correspond to the gap and 
-            ## incorporate these into the complete sequence.
             return X_minus_one, Q_minus_one
     
     
@@ -169,35 +167,25 @@ class DiffusionModel(pl.LightningModule):
         
         # Predict noise for both positional and quaternion data
         noise_pred = model(noisy_X_0, noisy_Q_0, t)
-        noise_pred = torch.permute(noise_pred, (0,2,1))
 
         # Reshape the noise so that it has the same structure as the noise prediction.
         batch_size, frames, joints, position_dims = noise_X.shape
-        noise_X = noise_X.view(batch_size, frames * joints, position_dims)
+        noise_X = noise_X.view(batch_size, frames, joints * position_dims)
 
         batch_size, frames, joints, quaternion_dims = noise_Q.shape
-        noise_Q = noise_Q.view(batch_size, frames * joints, quaternion_dims)
+        noise_Q = noise_Q.view(batch_size, frames, joints * quaternion_dims)
 
         # Concatenate the channels dimensions to consider X and Q at the same time
         noise_X_and_Q = torch.cat((noise_X, noise_Q), dim=2)
+        noise_X_and_Q = torch.permute(noise_X_and_Q, (0,2,1))
         
-        # Create a tensor for the masked frames and the joints
+        # Create a tensor for the masked frames
         masked_frames_tensor = torch.tensor(masked_frames).view(-1, 1)
-
-        # Compute which are the masked joints
-        ## Masking of X
         masked_frames_tensor = masked_frames_tensor.view(-1)
-        masked_elements_X = masked_frames_tensor * joints + 0 ## Plus 0 because I only consider the root, not other joints
-
-        ## Masking of Q
-        # Find the index of the row corresponding to all joints that need to be masked (frame to frame + joints - 1)
-        incremental_numbers = torch.arange(0, joints)
-        incremented_elements = masked_elements_X.unsqueeze(1) + incremental_numbers
-        masked_elements_Q = incremented_elements.flatten()
 
         # Calculate the loss
-        loss_X = F.mse_loss(noise_X_and_Q[:, masked_elements_X, :3], noise_pred[:, masked_elements_X, :3], reduction='sum')
-        loss_Q = F.mse_loss(noise_X_and_Q[:, masked_elements_Q, 3:], noise_pred[:, masked_elements_Q, 3:], reduction='sum')
+        loss_X = F.mse_loss(noise_X_and_Q[:, :(joints * 3), masked_frames_tensor], noise_pred[:, :(joints * 3), masked_frames_tensor], reduction='sum')
+        loss_Q = F.mse_loss(noise_X_and_Q[:, (joints * 3):, masked_frames_tensor], noise_pred[:, (joints * 3):, masked_frames_tensor], reduction='sum')
         
         return loss_X, loss_Q
     
@@ -288,7 +276,7 @@ if __name__ == "__main__":
         'class_path': 'pytorch_lightning.loggers.TensorBoardLogger',
         'init_args': {                      # Use init_args instead of params
             'save_dir': 'lightning_logs',
-            'name': 'my_model_mlp',
+            'name': 'my_model_correct_dims',
             'version': None
         }
     }

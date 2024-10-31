@@ -77,7 +77,7 @@ class SimpleMLP(nn.Module):
         t = self.time_mlp(timestep)
 
         batch_size, frames, joints, pos_dims = X.shape
-        X = X.view(batch_size, frames * joints, pos_dims)
+        X = X.view(batch_size, frames * joints, pos_dims) ## TODO: THIS NEEDS TO BE CHANGED IF I USE MLP
         batch_size, frames, joints, quaternion_dims = Q.shape
         Q = Q.view(batch_size, frames * joints, quaternion_dims) 
 
