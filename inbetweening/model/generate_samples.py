@@ -9,8 +9,8 @@ from inbetweening.utils.aux_functions import plot_3d_skeleton_with_lines, plot_r
 from inbetweening.data_processing.utils import compute_global_positions_in_a_sample
 from inbetweening.utils.convert_to_bvh import write_bvh
 
-path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_mlp/version_4/checkpoints/epoch=218-step=13359.ckpt'
-config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_mlp/version_4/config.yaml'
+path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_correct_dims/version_4/checkpoints/epoch=51-step=3172.ckpt'
+config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_correct_dims/version_4/config.yaml'
 
 # Load the config file
 with open(config_file_corresponding_to_ckpt, 'r') as f:
@@ -28,6 +28,7 @@ window = config['model']['window']
 n_joints = config['model']['n_joints']
 down_channels = config['model']['down_channels']
 type_model = config['model']['type_model']
+kernel_size = config['model']['kernel_size']
 
 model = DiffusionModel.load_from_checkpoint(
     path_to_checkpoint,
@@ -41,7 +42,8 @@ model = DiffusionModel.load_from_checkpoint(
     window=window,
     n_joints=n_joints,
     down_channels=down_channels,
-    type_model=type_model
+    type_model=type_model,
+    kernel_size=kernel_size
 )
 
 data_module = Lafan1DataModule(

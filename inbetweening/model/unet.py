@@ -6,35 +6,35 @@ import torch
 
 
 class Block(nn.Module):
-    def __init__(self, in_ch, out_ch, time_emb_dim, up=False):
+    def __init__(self, in_ch, out_ch, kernel_size, time_emb_dim, up=False):
         super().__init__()
         self.time_mlp = nn.Linear(time_emb_dim, out_ch)  
 
         if up:
-            self.conv1 = nn.Conv1d(2 * in_ch, out_ch, 3, padding=1)
+            self.conv1 = nn.Conv1d(2 * in_ch, out_ch, kernel_size, padding=kernel_size // 2)
             # Use ConvTranspose1d for upsampling (increasing sequence length)
             self.transform = nn.ConvTranspose1d(out_ch, out_ch, kernel_size=4, stride=2, padding=1)
+
         else:
-            self.conv1 = nn.Conv1d(in_ch, out_ch, 3, padding=1)
-            # Use MaxPool1d for downsampling (reducing sequence length)
-            self.transform = nn.MaxPool1d(2)
+            self.conv1 = nn.Conv1d(in_ch, out_ch, kernel_size, stride=2, padding=kernel_size // 2)  # Downsampling with stride instead of MaxPool
+            self.transform = nn.Identity()
         
-        self.conv2 = nn.Conv1d(out_ch, out_ch, 3, padding=1)
+        self.conv2 = nn.Conv1d(out_ch, out_ch, kernel_size, padding=kernel_size // 2)
         self.bnorm1 = nn.BatchNorm1d(out_ch)
         self.bnorm2 = nn.BatchNorm1d(out_ch)
-        self.relu = nn.ReLU()
+        self.mish = nn.Mish() ## An activation function similar to ReLU
         
     def forward(self, x, t):
         # First Conv
-        h = self.bnorm1(self.relu(self.conv1(x)))   
+        h = self.bnorm1(self.mish(self.conv1(x)))
         # Time embedding
-        time_emb = self.relu(self.time_mlp(t))
+        time_emb = self.mish(self.time_mlp(t))
         # Extend last 2 dimensions
         time_emb = time_emb[:, :, None]
         # Add time embedding
         h = h + time_emb
         # Second Conv
-        h = self.bnorm2(self.relu(self.conv2(h)))
+        h = self.bnorm2(self.mish(self.conv2(h)))
         # Downsample or Upsample
         return self.transform(h)
 
@@ -58,13 +58,14 @@ class SimpleUnet(nn.Module):
     """
     A simplified variant of the Unet architecture.
     """
-    def __init__(self, time_emb_dim, window, n_joints, down_channels):
+    def __init__(self, time_emb_dim, window, n_joints, down_channels, kernel_size):
         super().__init__()
         self.n_joints = n_joints
         self.down_channels = down_channels # Right part of the UNet
         self.up_channels = self.down_channels[::-1] # Same channels than down_channels, but reversed
         print(self.up_channels)
-        time_emb_dim = time_emb_dim
+        self.time_emb_dim = time_emb_dim
+        self.kernel_size = kernel_size
 
         # Time embedding
         self.time_mlp = nn.Sequential(
@@ -74,12 +75,12 @@ class SimpleUnet(nn.Module):
             )
         
         # Initial projection
-        self.conv0 = nn.Conv1d(in_channels=n_joints*7, out_channels=self.down_channels[0], kernel_size=3, padding=1) ## TODO: HARDCODED IN_CHANNELS
+        self.conv0 = nn.Conv1d(in_channels=n_joints*7, out_channels=self.down_channels[0], kernel_size=kernel_size, padding=kernel_size // 2) ## TODO: HARDCODED IN_CHANNELS
 
         # Downsample
-        self.downs = nn.ModuleList([Block(self.down_channels[i], self.down_channels[i+1], time_emb_dim, up=False) for i in range(len(self.down_channels)-1)])
+        self.downs = nn.ModuleList([Block(self.down_channels[i], self.down_channels[i+1], self.kernel_size, time_emb_dim, up=False) for i in range(len(self.down_channels)-1)])
         # Upsample
-        self.ups = nn.ModuleList([Block(self.up_channels[i], self.up_channels[i+1], time_emb_dim, up=True) for i in range(len(self.up_channels)-1)])
+        self.ups = nn.ModuleList([Block(self.up_channels[i], self.up_channels[i+1], self.kernel_size, time_emb_dim, up=True) for i in range(len(self.up_channels)-1)])
         
         self.output = nn.Conv1d(self.up_channels[-1], n_joints*7, 1) ## TODO: HARDCODED IN_CHANNELS
 
@@ -110,15 +111,20 @@ class SimpleUnet(nn.Module):
             residual_X_and_Q = residual_inputs.pop()
 
             if residual_X_and_Q.shape[2] > X_and_Q.shape[2]:
-                # Pad Q to match the shape of residual_Q and allow concatenation
+                # Pad X_and_Q to match residual shape for concatenation
                 pad_amount = max(0, residual_X_and_Q.shape[2] - X_and_Q.shape[2])
                 X_and_Q = F.pad(X_and_Q, (0, pad_amount)) # No padding on the left side, just the right side
+            elif residual_X_and_Q.shape[2] < X_and_Q.shape[2]: ### TODO: Check with Rajmund
+                # Pad X_and_Q to match residual shape for concatenation
+                pad_amount = max(0, X_and_Q.shape[2] - residual_X_and_Q.shape[2])
+                residual_X_and_Q = F.pad(residual_X_and_Q, (0, pad_amount)) # No padding on the left side, just the right side
 
-            # Add residual x as additional channels
-            X_and_Q = torch.cat((X_and_Q, residual_X_and_Q), dim=1)           
+            # Concatenate residual input along channels
+            X_and_Q = torch.cat((X_and_Q, residual_X_and_Q), dim=1)
             X_and_Q = up(X_and_Q, t)
 
         output = self.output(X_and_Q)
+        # output = torch.tanh(output)
         # output[:, :(self.n_joints * 3), :] = torch.tanh(output[:, :(self.n_joints * 3), :]) ## TODO: Check!!
         
         return output

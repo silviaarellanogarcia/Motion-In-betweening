@@ -39,7 +39,7 @@ def get_index_from_list(vals, t, x_shape):
 
 
 class DiffusionModel(pl.LightningModule):
-    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str):
+    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str, kernel_size: int):
         super().__init__() # Initialize the parent's class before initializing any child
 
         # Get beta scheduler
@@ -56,9 +56,11 @@ class DiffusionModel(pl.LightningModule):
         self.posterior_variance = betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
 
         self.type_model = type_model
+        
+        self.kernel_size = kernel_size
 
         if type_model == 'unet':
-            self.model = SimpleUnet(time_emb_dim, window, n_joints, down_channels)
+            self.model = SimpleUnet(time_emb_dim, window, n_joints, down_channels, kernel_size)
         else:
             ## In this case down_channels refers to the hidden dimensions
             self.model = SimpleMLP(time_emb_dim, window, n_joints, down_channels)

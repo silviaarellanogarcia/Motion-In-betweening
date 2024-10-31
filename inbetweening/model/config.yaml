@@ -19,4 +19,5 @@ model:
   window: *window_val
   n_joints: 22 ## Hardcoded according to the dataset
   type_model: 'unet'
-  down_channels: [256, 512, 1024] ## THE NUMBER OF CHANNELS IN THE UNET SHOULD INCREASE IN THE DOWN BRANCH, AND INCREASE IN THE UP BRANCH
+  down_channels: [154, 256, 512, 1024] ## THE NUMBER OF CHANNELS IN THE UNET SHOULD INCREASE IN THE DOWN BRANCH, AND INCREASE IN THE UP BRANCH
+  kernel_size: 5
