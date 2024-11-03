@@ -70,6 +70,10 @@ class DiffusionModel(pl.LightningModule):
 
         self.gap_size = gap_size
         self.type_masking = type_masking
+
+        ## USEFUL FOR FINDING IF IT WORKS CORRECTLY, BUT ERASE LATER (TODO: DELETE)
+        # self.FIXED_NOISE_X = torch.randn((256, window, n_joints, 3))
+        # self.FIXED_NOISE_Q = torch.randn((256, window, n_joints, 4))
     
     def masking(self, n_frames, gap_size, type='continued'):
         """
@@ -105,6 +109,7 @@ class DiffusionModel(pl.LightningModule):
         """ 
         ## Apply noise to position --> It only needs to be applied on the root, not the offsets.
         noise_X = torch.randn_like(X_0)
+        # noise_X = self.FIXED_NOISE_X.cuda() ## TODO: Delete this when I finish debugging
         sqrt_alphas_cumprod_t_X = get_index_from_list(self.sqrt_alphas_cumprod, t, X_0.shape)  ## Alpha with an overline in the notation
         sqrt_one_minus_alphas_cumprod_t_X = get_index_from_list(self.sqrt_one_minus_alphas_cumprod, t, X_0.shape)
 
@@ -113,6 +118,7 @@ class DiffusionModel(pl.LightningModule):
 
         ## Apply noise to quaternions
         noise_Q = torch.randn_like(Q_0)
+        # noise_Q = self.FIXED_NOISE_Q.cuda() ## TODO: Delete this when I finish debugging
         sqrt_alphas_cumprod_t_Q = get_index_from_list(self.sqrt_alphas_cumprod, t, Q_0.shape) 
         sqrt_one_minus_alphas_cumprod_t_Q = get_index_from_list(self.sqrt_one_minus_alphas_cumprod, t, Q_0.shape)
 
@@ -256,10 +262,6 @@ class DiffusionModel(pl.LightningModule):
                 # Normalize quaternions to ensure they remain valid unit quaternions
                 noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
 
-            # These two lines are temporary. TODO: Substitute with something more meaningful like generating the BVH
-            # print("Denoised sequences X:", noisy_X_0[:, :, 0, :])
-            # print("Denoised sequences Q:", noisy_Q_0.shape)
-
             # Normalize the quaternions to ensure they are valid unit quaternions
             noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1) ## TODO: Check that the samples that weren't modified remain the same
 
@@ -278,7 +280,7 @@ if __name__ == "__main__":
         'class_path': 'pytorch_lightning.loggers.TensorBoardLogger',
         'init_args': {                      # Use init_args instead of params
             'save_dir': 'lightning_logs',
-            'name': 'my_model_correct_dims',
+            'name': 'my_model_scaling',
             'version': None
         }
     }
@@ -295,7 +297,7 @@ if __name__ == "__main__":
                  trainer_defaults={
                      'logger': logger_config,
                      'callbacks': [checkpoint_callback],
-                    #   'overfit_batches': 5 ## TODO: AT SOME POINT REMOVE THE OVERFITTING
+                    #  'overfit_batches': 1 ## TODO: AT SOME POINT REMOVE THE OVERFITTING
     })
 
     ## COMMAND: python diffusion.py fit --config ./config.yaml

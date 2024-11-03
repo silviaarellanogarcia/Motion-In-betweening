@@ -9,7 +9,7 @@ from inbetweening.data_processing.extract import get_lafan1_set
 class Lafan1Dataset(Dataset):
     """LAFAN1 Dataset class."""
 
-    def __init__(self, data_dir: str, window: int, offset: int, train: bool=True, val: bool=False, test: bool=False):
+    def __init__(self, data_dir: str, window: int, offset: int, scaling: int, train: bool=True, val: bool=False, test: bool=False):
         """
         Args:
             data_dir (string): Directory with the dataset.
@@ -28,6 +28,8 @@ class Lafan1Dataset(Dataset):
         self.data_dir = data_dir
         self.window = window
         self.offset = offset
+
+        self.scaling = scaling
 
         self.training_mean_X = None
         self.training_std_X = None
@@ -93,6 +95,7 @@ class Lafan1Dataset(Dataset):
 
         # Normalize the global position (-1, 1)
         X = (X - self.training_mean_X) / (self.training_std_X + 1e-8)
+        X = X * self.scaling # TODO: Check this and tune scaling value
 
         sample = {
             'X': torch.tensor(X, dtype=torch.float32),
@@ -120,7 +123,7 @@ class Lafan1Dataset(Dataset):
     
     
 class Lafan1DataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str, batch_size: int, window: int, offset: int):
+    def __init__(self, data_dir: str, batch_size: int, window: int, offset: int, scaling: int):
         """
         Args:
             data_dir (string): Directory with the dataset.
@@ -132,6 +135,7 @@ class Lafan1DataModule(pl.LightningDataModule):
         self.window = window
         self.offset = offset
         self.batch_size = batch_size
+        self.scaling = scaling
 
         # Initialize datasets
         self.train_dataset = None
@@ -165,11 +169,11 @@ class Lafan1DataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         if stage == 'fit' or stage is None:
-            self.train_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=True, val=False, test=False)
-            self.val_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=True, test=False)
+            self.train_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, scaling=self.scaling, train=True, val=False, test=False)
+            self.val_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, scaling=self.scaling, train=False, val=True, test=False)
 
         elif stage == 'test':
-            self.test_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=False, test=True)
+            self.test_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, scaling=self.scaling, train=False, val=False, test=True)
     
 if __name__ == "__main__":
     bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"  # Update this with the actual path

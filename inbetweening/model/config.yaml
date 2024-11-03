@@ -1,12 +1,13 @@
 trainer:
   max_epochs: 1000
-  precision: 32 # TODO: LOOK!! Potential source of error
+  precision: 32
 
 data:
   data_dir: /proj/diffusion-inbetweening/data
   batch_size: 256
   window: &window_val 50
   offset: 20
+  scaling: 10
   
 model:
   lr: 0.0001
@@ -19,5 +20,5 @@ model:
   window: *window_val
   n_joints: 22 ## Hardcoded according to the dataset
   type_model: 'unet'
-  down_channels: [154, 256, 512, 1024] ## THE NUMBER OF CHANNELS IN THE UNET SHOULD INCREASE IN THE DOWN BRANCH, AND INCREASE IN THE UP BRANCH
+  down_channels: [256, 512, 1024] ## THE NUMBER OF CHANNELS IN THE UNET SHOULD INCREASE IN THE DOWN BRANCH, AND INCREASE IN THE UP BRANCH
   kernel_size: 5

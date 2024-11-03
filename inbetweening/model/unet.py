@@ -83,6 +83,7 @@ class SimpleUnet(nn.Module):
         self.ups = nn.ModuleList([Block(self.up_channels[i], self.up_channels[i+1], self.kernel_size, time_emb_dim, up=True) for i in range(len(self.up_channels)-1)])
         
         self.output = nn.Conv1d(self.up_channels[-1], n_joints*7, 1) ## TODO: HARDCODED IN_CHANNELS
+        self.output_linear = nn.Linear(n_joints*7, n_joints*7)
 
     def forward(self, X, Q, timestep):
         # Embed time
@@ -110,22 +111,20 @@ class SimpleUnet(nn.Module):
         for up in self.ups:
             residual_X_and_Q = residual_inputs.pop()
 
-            if residual_X_and_Q.shape[2] > X_and_Q.shape[2]:
-                # Pad X_and_Q to match residual shape for concatenation
-                pad_amount = max(0, residual_X_and_Q.shape[2] - X_and_Q.shape[2])
-                X_and_Q = F.pad(X_and_Q, (0, pad_amount)) # No padding on the left side, just the right side
-            elif residual_X_and_Q.shape[2] < X_and_Q.shape[2]: ### TODO: Check with Rajmund
-                # Pad X_and_Q to match residual shape for concatenation
-                pad_amount = max(0, X_and_Q.shape[2] - residual_X_and_Q.shape[2])
-                residual_X_and_Q = F.pad(residual_X_and_Q, (0, pad_amount)) # No padding on the left side, just the right side
+            # Ensure both tensors have the same length
+            min_len = min(X_and_Q.shape[2], residual_X_and_Q.shape[2])
+            X_and_Q = X_and_Q[:, :, :min_len]
+            residual_X_and_Q = residual_X_and_Q[:, :, :min_len]
 
-            # Concatenate residual input along channels
+            # Concatenate along the channel dimension
             X_and_Q = torch.cat((X_and_Q, residual_X_and_Q), dim=1)
             X_and_Q = up(X_and_Q, t)
 
         output = self.output(X_and_Q)
-        # output = torch.tanh(output)
-        # output[:, :(self.n_joints * 3), :] = torch.tanh(output[:, :(self.n_joints * 3), :]) ## TODO: Check!!
+
+        output = output.permute(0, 2, 1)
+        output = self.output_linear(output)
+        output = output.permute(0, 2, 1)
         
         return output
 
