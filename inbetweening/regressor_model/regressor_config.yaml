@@ -1,0 +1,16 @@
+trainer:
+  max_epochs: 1000
+  precision: 32
+
+data:
+  data_dir: /proj/diffusion-inbetweening/data
+  batch_size: 256
+  window: 50
+  offset: 20
+  scaling: 1
+  
+model:
+  lr: 0.0001
+  gap_size: 2
+  type_masking: 'continued' # Options are continued or spread
+  hidden_size: 128
