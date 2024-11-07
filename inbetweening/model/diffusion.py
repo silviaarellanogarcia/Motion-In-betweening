@@ -198,7 +198,12 @@ class DiffusionModel(pl.LightningModule):
         return loss_X, loss_Q
     
     def training_step(self, batch, batch_idx):
+        if self.global_step % 8000 == 0: # TODO: Change 5 with a parameter that indicates the maximum gap
+            # Increase gap_size by a fixed amount, e.g., increase by 1 for every 20,000 steps
+            self.gap_size = min(self.gap_size + 1, 5) # TODO: Change 5 with a parameter that indicates the maximum gap
+
         # Batch processing
+        ### Real data, named "X" in the paper
         X_0 = batch['X']
         Q_0 = batch['Q']
         t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
@@ -206,14 +211,26 @@ class DiffusionModel(pl.LightningModule):
         # Masking
         masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
+        ## Compute "X - X_ref"
+        if 0 in masked_frames:
+            raise AssertionError("Frame 0 is in masked frames!")
+        
+        X_input = X_0 - X_0[:, masked_frames[0] - 1, :, :].unsqueeze(1)
+        Q_input = Q_0 - Q_0[:, masked_frames[0] - 1, :, :].unsqueeze(1)
+
+
         # Calculate loss
-        loss_X, loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)
+        loss_X, loss_Q = self.get_loss(self.model, X_input, Q_input, t, masked_frames)
         total_loss = ((1/X_0.shape[2] * loss_X) + loss_Q) / X_0.shape[0]
         
         # Log loss
         self.log('train_loss_X', loss_X/X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
         self.log('train_loss_Q', loss_Q/X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
         self.log('train_total_loss', total_loss, prog_bar=True, on_step=True)
+
+        optimizer = self.optimizers()  # Use `self.optimizers()` in Lightning to get the optimizer
+        current_lr = optimizer.param_groups[0]['lr']
+        self.log('learning_rate', current_lr, prog_bar=True, on_step=True, on_epoch=True)
 
         return total_loss
     
@@ -226,9 +243,16 @@ class DiffusionModel(pl.LightningModule):
         # Masking
         masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
+        ## Compute "X - X_ref"
+        if 0 in masked_frames:
+            raise AssertionError("Frame 0 is in masked frames!")
+        
+        X_input = X_0 - X_0[:, masked_frames[0] - 1, :, :].unsqueeze(1)
+        Q_input = Q_0 - Q_0[:, masked_frames[0] - 1, :, :].unsqueeze(1)
+
         # Calculate loss
-        loss_X, loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)
-        total_loss = ((1/X_0.shape[2] * loss_X) + loss_Q) / X_0.shape[0]
+        loss_X, loss_Q = self.get_loss(self.model, X_input, Q_input, t, masked_frames)
+        total_loss = ((1/X_input.shape[2] * loss_X) + loss_Q) / X_input.shape[0]
         
         # Log loss
         self.log('validation_loss_X', loss_X / X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
@@ -248,8 +272,15 @@ class DiffusionModel(pl.LightningModule):
             # Masking
             masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
+            ## Compute "X - X_ref"
+            if 0 in masked_frames:
+                raise AssertionError("Frame 0 is in masked frames!")
+            
+            X_input = X_0 - X_0[masked_frames[0] - 1, :, :] ## TODO: Check if the shape is (1, X, X, X) or (X, X, X)
+            Q_input = Q_0 - X_0[masked_frames[0] - 1, :, :]
+
             # Calculate loss
-            noisy_X_0, noisy_Q_0, _, _ = self.forward_diffusion_sample(X_0, Q_0, t, masked_frames)
+            noisy_X_0, noisy_Q_0, _, _ = self.forward_diffusion_sample(X_input, Q_input, t, masked_frames)
 
             for step in reversed(range(self.n_diffusion_timesteps)):
                 t_step = torch.tensor([step], device=self.device).long()
@@ -260,17 +291,32 @@ class DiffusionModel(pl.LightningModule):
                 noisy_Q_0[:, masked_frames, :, :] = denoised_Q_complete_seq[:, masked_frames, :, :].float()
 
                 # Normalize quaternions to ensure they remain valid unit quaternions
-                noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
+                # noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
 
             # Normalize the quaternions to ensure they are valid unit quaternions
-            noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1) ## TODO: Check that the samples that weren't modified remain the same
+            # noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1) ## TODO: Check that the samples that weren't modified remain the same
 
         return noisy_X_0[0], noisy_Q_0[0]
 
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.99)
+        # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.9999)
+
+        scheduler = {
+            'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, 
+                mode='min',
+                factor=0.3, # Reduce the learning rate by 30%
+                patience=10, # Number of epochs to wait before reducing LR
+                min_lr=1e-6, # Minimum learning rate to avoid reducing too much
+                verbose=True
+            ),
+            'monitor': 'train_total_loss', # The metric to monitor; ensure 'val_loss' is logged in validation_step
+            'interval': 'epoch',   # Check at the end of every epoch
+            'frequency': 1         # Check after every epoch
+        }
+
         return [optimizer], [scheduler]
 
 
@@ -280,7 +326,7 @@ if __name__ == "__main__":
         'class_path': 'pytorch_lightning.loggers.TensorBoardLogger',
         'init_args': {                      # Use init_args instead of params
             'save_dir': 'lightning_logs',
-            'name': 'my_model_scaling',
+            'name': 'my_model_prueba',
             'version': None
         }
     }

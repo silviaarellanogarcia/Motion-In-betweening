@@ -5,6 +5,7 @@ import pytorch_lightning as pl
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
 from inbetweening.data_processing.extract import get_lafan1_set
+import pymotion.rotations.ortho6d as sixd
 
 class Lafan1Dataset(Dataset):
     """LAFAN1 Dataset class."""
@@ -97,6 +98,11 @@ class Lafan1Dataset(Dataset):
         X = (X - self.training_mean_X) / (self.training_std_X + 1e-8)
         X = X * self.scaling # TODO: Check this and tune scaling value
 
+        # Convert quaternions to Ortho6D
+        Q_rotations_tensor = torch.from_numpy(Q)
+        Q = sixd.from_quat(Q_rotations_tensor) # Shape (frames, joints, 3, 2)
+        Q = Q.reshape(Q.shape[0], Q.shape[1], -1) # Shape (frames, joints, 6)
+
         sample = {
             'X': torch.tensor(X, dtype=torch.float32),
             'Q': torch.tensor(Q, dtype=torch.float32),
@@ -146,7 +152,8 @@ class Lafan1DataModule(pl.LightningDataModule):
         loader = torch.utils.data.DataLoader(
             dataset=self.train_dataset,
             batch_size=self.batch_size,
-            shuffle=True
+            shuffle=True,
+            num_workers=4
         )
         return loader
 
@@ -154,7 +161,8 @@ class Lafan1DataModule(pl.LightningDataModule):
         loader = torch.utils.data.DataLoader(
             dataset=self.val_dataset,
             batch_size=self.batch_size,
-            shuffle=False
+            shuffle=False,
+            num_workers=4
         )
         return loader
 

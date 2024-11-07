@@ -6,6 +6,6 @@ __pycache__/
 package.egg-info
 lightning_logs/
 logs/
-inbetweening/model/pickle_data
+pickle_data
 error_*
 output_*

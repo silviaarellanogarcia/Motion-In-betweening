@@ -66,6 +66,7 @@ class SimpleUnet(nn.Module):
         print(self.up_channels)
         self.time_emb_dim = time_emb_dim
         self.kernel_size = kernel_size
+        self.n_dimensions = 3 + 6
 
         # Time embedding
         self.time_mlp = nn.Sequential(
@@ -75,15 +76,15 @@ class SimpleUnet(nn.Module):
             )
         
         # Initial projection
-        self.conv0 = nn.Conv1d(in_channels=n_joints*7, out_channels=self.down_channels[0], kernel_size=kernel_size, padding=kernel_size // 2) ## TODO: HARDCODED IN_CHANNELS
+        self.conv0 = nn.Conv1d(in_channels=n_joints*self.n_dimensions, out_channels=self.down_channels[0], kernel_size=kernel_size, padding=kernel_size // 2) ## TODO: HARDCODED IN_CHANNELS
 
         # Downsample
         self.downs = nn.ModuleList([Block(self.down_channels[i], self.down_channels[i+1], self.kernel_size, time_emb_dim, up=False) for i in range(len(self.down_channels)-1)])
         # Upsample
         self.ups = nn.ModuleList([Block(self.up_channels[i], self.up_channels[i+1], self.kernel_size, time_emb_dim, up=True) for i in range(len(self.up_channels)-1)])
         
-        self.output = nn.Conv1d(self.up_channels[-1], n_joints*7, 1) ## TODO: HARDCODED IN_CHANNELS
-        self.output_linear = nn.Linear(n_joints*7, n_joints*7)
+        self.output = nn.Conv1d(self.up_channels[-1], n_joints*self.n_dimensions, 1) ## TODO: HARDCODED IN_CHANNELS
+        self.output_linear = nn.Linear(n_joints*self.n_dimensions, n_joints*self.n_dimensions)
 
     def forward(self, X, Q, timestep):
         # Embed time
