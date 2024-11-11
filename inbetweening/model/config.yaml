@@ -7,14 +7,13 @@ data:
   batch_size: 256
   window: &window_val 50
   offset: 20
-  scaling: 10
   
 model:
   lr: 0.0001
   beta_start: 0.0001 
   beta_end: 0.02
   n_diffusion_timesteps: 1000
-  gap_size: 2
+  gap_size: 1
   type_masking: 'continued' # Options are continued or spread
   time_emb_dim: 32
   window: *window_val

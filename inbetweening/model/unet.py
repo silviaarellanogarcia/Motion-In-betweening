@@ -66,7 +66,7 @@ class SimpleUnet(nn.Module):
         print(self.up_channels)
         self.time_emb_dim = time_emb_dim
         self.kernel_size = kernel_size
-        self.n_dimensions = 3 + 6
+        self.n_dimensions = 6
 
         # Time embedding
         self.time_mlp = nn.Sequential(
@@ -76,52 +76,46 @@ class SimpleUnet(nn.Module):
             )
         
         # Initial projection
-        self.conv0 = nn.Conv1d(in_channels=n_joints*self.n_dimensions, out_channels=self.down_channels[0], kernel_size=kernel_size, padding=kernel_size // 2) ## TODO: HARDCODED IN_CHANNELS
+        self.conv0 = nn.Conv1d(in_channels=n_joints*self.n_dimensions, out_channels=self.down_channels[0], kernel_size=kernel_size, padding=kernel_size // 2)
 
         # Downsample
         self.downs = nn.ModuleList([Block(self.down_channels[i], self.down_channels[i+1], self.kernel_size, time_emb_dim, up=False) for i in range(len(self.down_channels)-1)])
         # Upsample
         self.ups = nn.ModuleList([Block(self.up_channels[i], self.up_channels[i+1], self.kernel_size, time_emb_dim, up=True) for i in range(len(self.up_channels)-1)])
         
-        self.output = nn.Conv1d(self.up_channels[-1], n_joints*self.n_dimensions, 1) ## TODO: HARDCODED IN_CHANNELS
+        self.output = nn.Conv1d(self.up_channels[-1], n_joints*self.n_dimensions, 1)
         self.output_linear = nn.Linear(n_joints*self.n_dimensions, n_joints*self.n_dimensions)
 
-    def forward(self, X, Q, timestep):
+    def forward(self, Q, timestep):
         # Embed time
         t = self.time_mlp(timestep)
 
-        batch_size, frames, joints, pos_dims = X.shape
-        X = X.view(batch_size, frames, joints * pos_dims)
         batch_size, frames, joints, quaternion_dims = Q.shape
         Q = Q.view(batch_size, frames, joints * quaternion_dims) 
-
-        # Concatenate the channels dimensions to be able to pass to the network X and Q at the same time
-        X_and_Q = torch.cat((X, Q), dim=2)
-
-        X_and_Q = torch.permute(X_and_Q, (0,2,1))
+        Q = torch.permute(Q, (0,2,1))
 
         # Initial conv and safety check
-        X_and_Q = self.conv0(X_and_Q.float())
-        assert X_and_Q.shape[1] == self.down_channels[0], "The first dimension of the data doesn't match with the num of channels of the first step of the network!"
+        Q = self.conv0(Q.float())
+        assert Q.shape[1] == self.down_channels[0], "The first dimension of the data doesn't match with the num of channels of the first step of the network!"
 
         # Unet
         residual_inputs = []
         for down in self.downs:
-            X_and_Q = down(X_and_Q, t)
-            residual_inputs.append(X_and_Q)
+            Q = down(Q, t)
+            residual_inputs.append(Q)
         for up in self.ups:
-            residual_X_and_Q = residual_inputs.pop()
+            residual_Q = residual_inputs.pop()
 
             # Ensure both tensors have the same length
-            min_len = min(X_and_Q.shape[2], residual_X_and_Q.shape[2])
-            X_and_Q = X_and_Q[:, :, :min_len]
-            residual_X_and_Q = residual_X_and_Q[:, :, :min_len]
+            min_len = min(Q.shape[2], residual_Q.shape[2])
+            Q = Q[:, :, :min_len]
+            residual_Q = residual_Q[:, :, :min_len]
 
             # Concatenate along the channel dimension
-            X_and_Q = torch.cat((X_and_Q, residual_X_and_Q), dim=1)
-            X_and_Q = up(X_and_Q, t)
+            Q = torch.cat((Q, residual_Q), dim=1)
+            Q = up(Q, t)
 
-        output = self.output(X_and_Q)
+        output = self.output(Q)
 
         output = output.permute(0, 2, 1)
         output = self.output_linear(output)
