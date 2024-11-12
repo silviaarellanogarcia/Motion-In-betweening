@@ -1,5 +1,5 @@
 trainer:
-  max_epochs: 1000
+  max_epochs: 50000 ## TODO: Adapt
   precision: 32
 
 data:
@@ -13,7 +13,7 @@ model:
   beta_start: 0.0001 
   beta_end: 0.02
   n_diffusion_timesteps: 1000
-  gap_size: 1
+  gap_size: 15 # Set this to the gap size I want to have at the beginning of the training (1 for the first time, higher if we start from a checkpoint)
   type_masking: 'continued' # Options are continued or spread
   time_emb_dim: 32
   window: *window_val
@@ -21,3 +21,5 @@ model:
   type_model: 'unet'
   down_channels: [256, 512, 1024] ## THE NUMBER OF CHANNELS IN THE UNET SHOULD INCREASE IN THE DOWN BRANCH, AND INCREASE IN THE UP BRANCH
   kernel_size: 5
+  step_threshold: 12000 ## TODO: Adapt
+  max_gap_size: 30

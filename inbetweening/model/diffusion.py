@@ -39,7 +39,7 @@ def get_index_from_list(vals, t, x_shape):
 
 
 class DiffusionModel(pl.LightningModule):
-    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str, kernel_size: int):
+    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str, kernel_size: int, step_threshold: int, max_gap_size: int):
         super().__init__() # Initialize the parent's class before initializing any child
 
         # Get beta scheduler
@@ -70,6 +70,9 @@ class DiffusionModel(pl.LightningModule):
 
         self.gap_size = gap_size
         self.type_masking = type_masking
+        self.step_threshold = step_threshold
+        self.max_gap_size = max_gap_size
+        self.steps_since_last_gap_increase = 0  # Counter for steps since last gap increase
     
     def masking(self, n_frames, gap_size, type='continued'):
         """
@@ -113,7 +116,7 @@ class DiffusionModel(pl.LightningModule):
         
         return noisy_Q_0, noise_Q
     
-    def sample_timestep(self, noisy_Q, t):
+    def sample_timestep(self, X_0, noisy_Q, t):
         """
         Calls the model to predict the noise in the motion sequence and returns the denoised image. 
         Applies noise to this motion sequence, if we are not in the last step yet.
@@ -122,7 +125,7 @@ class DiffusionModel(pl.LightningModule):
         sqrt_one_minus_alphas_cumprod_t = get_index_from_list(self.sqrt_one_minus_alphas_cumprod, t, noisy_Q.shape)
         sqrt_recip_alphas_t = get_index_from_list(self.sqrt_recip_alphas, t, noisy_Q.shape)
 
-        noise_Q_pred = self.model(noisy_Q, t) ### I will have X and Q together and I have to separate them.
+        noise_Q_pred = self.model(X_0, noisy_Q, t) ### I will have X and Q together and I have to separate them.
         noise_Q_pred = torch.permute(noise_Q_pred, (0,2,1))
 
         # Convert back to the shape (1, 50, 22, angle_dim) --> TODO: BE CAREFUL!
@@ -144,19 +147,19 @@ class DiffusionModel(pl.LightningModule):
             return Q_minus_one
     
     
-    def get_loss(self, model, Q_0, t, masked_frames):
+    def get_loss(self, model, X_0, Q_0, t, masked_frames):
         """
         Compute the loss between the predicted noise and the actual noise for both positions (X_0) and quaternions (Q_0).
         """
         noisy_Q_0, noise_Q = self.forward_diffusion_sample(Q_0, t, masked_frames)
         
         # Predict noise for both positional and quaternion data
-        noise_pred = model(noisy_Q_0, t)
+
+        noise_pred = model(X_0, noisy_Q_0, t)
 
         # Reshape the noise so that it has the same structure as the noise prediction.
-        batch_size, frames, joints, quaternion_dims = noise_Q.shape
-        noise_Q = noise_Q.view(batch_size, frames, joints * quaternion_dims)
-        # Permute to apply the convolution in the time dimension
+        batch_size, frames, joints, angle_dims = noise_Q.shape
+        noise_Q = noise_Q.view(batch_size, frames, joints * angle_dims)
         noise_Q = torch.permute(noise_Q, (0,2,1))
         
         # Create a tensor for the masked frames
@@ -169,33 +172,37 @@ class DiffusionModel(pl.LightningModule):
         return loss_Q
     
     def training_step(self, batch, batch_idx):
-        if self.global_step % 10000 == 0:  # TODO: Change 5 with a parameter indicating the maximum gap
-            self.gap_size = min(self.gap_size + 1, 5)  # TODO: Adjust maximum gap parameter
+        if self.steps_since_last_gap_increase >= self.step_threshold:  # TODO: Change 5 with a parameter indicating the maximum gap
+            self.gap_size = min(self.gap_size + 1, self.max_gap_size)  # TODO: Adjust maximum gap parameter
+            self.step_threshold += 5000
+            self.steps_since_last_gap_increase = 0
 
+        X_0 = batch['X']
         Q_0 = batch['Q']
+
         t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
         masked_frames = self.masking(n_frames=Q_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
         # Calculate loss
-        loss_Q = self.get_loss(self.model, Q_0, t, masked_frames)
+        loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)
         total_loss = loss_Q / Q_0.shape[0]
         
         # Log both step and epoch loss
-        self.log('train_total_loss', total_loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log('train_total_loss', total_loss, prog_bar=True, on_step=True)
 
         optimizer = self.optimizers()
         current_lr = optimizer.param_groups[0]['lr']
-        self.log('learning_rate', current_lr, prog_bar=True, on_step=True, on_epoch=True)
+        self.log('learning_rate', current_lr, prog_bar=True, on_step=True)
+        self.log('gap_size', self.gap_size, prog_bar=True, on_step=True)
+
+        # Update the step counter
+        self.steps_since_last_gap_increase += 1
 
         return total_loss
-
-    def training_epoch_end(self, outputs):
-        # Collect losses from each batch in the epoch
-        avg_loss = torch.stack([x['train_total_loss'] for x in outputs]).mean()
-        self.log('train_total_loss_epoch', avg_loss, prog_bar=True)
     
     def validation_step(self, batch, batch_idx):
         # Batch processing
+        X_0 = batch['X']
         Q_0 = batch['Q']
         t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
 
@@ -205,7 +212,7 @@ class DiffusionModel(pl.LightningModule):
         # Q_input = Q_0 - Q_0[:, masked_frames[0] - 1, :, :].unsqueeze(1) ## TODO: TRY THIS THING LATER, NOW JUST PREDICT THE Q
 
         # Calculate loss
-        loss_Q = self.get_loss(self.model, Q_0, t, masked_frames)
+        loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)
         total_loss = (loss_Q) / Q_0.shape[0]
         
         # Log loss
@@ -213,9 +220,10 @@ class DiffusionModel(pl.LightningModule):
 
         return total_loss
     
-    def generate_samples(self, Q_0):
+    def generate_samples(self, X_0, Q_0):
         self.eval()
         with torch.no_grad():
+            X_0 = X_0.unsqueeze(0)
             Q_0 = Q_0.unsqueeze(0) ## This adds the batch dimension
 
             t = torch.full((Q_0.shape[0],), self.n_diffusion_timesteps - 1, device=self.device).long()
@@ -230,7 +238,7 @@ class DiffusionModel(pl.LightningModule):
                 t_step = torch.tensor([step], device=self.device).long()
 
                 # Denoise positions and angles
-                denoised_Q_complete_seq = self.sample_timestep(noisy_Q_0, t_step)
+                denoised_Q_complete_seq = self.sample_timestep(X_0, noisy_Q_0, t_step)
                 noisy_Q_0[:, masked_frames, :, :] = denoised_Q_complete_seq[:, masked_frames, :, :].float()
 
         return noisy_Q_0[0], masked_frames
@@ -263,15 +271,16 @@ if __name__ == "__main__":
         'class_path': 'pytorch_lightning.loggers.TensorBoardLogger',
         'init_args': {                      # Use init_args instead of params
             'save_dir': 'lightning_logs',
-            'name': 'my_model_only_Q',
+            'name': 'my_model_Q_and_X',
             'version': None
         }
     }
 
     checkpoint_callback = ModelCheckpoint(
-        save_top_k=10,  # Keep 10 checkpoints
-        monitor='validation_total_loss',
-        mode="min"
+        save_top_k=-1,  # Keep all checkpoints
+        monitor='train_total_loss',
+        mode="min",
+        every_n_epochs=20 # Save every 10 epochs
     )
 
     # Use LightningCLI with the updated logger configuration
