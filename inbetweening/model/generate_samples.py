@@ -4,13 +4,15 @@ from pytorch_lightning.utilities.model_summary import summarize
 import yaml
 
 from inbetweening.data_processing.process_data import Lafan1DataModule
+from inbetweening.evaluation.baseline import full_interpolation
 from inbetweening.model.diffusion import DiffusionModel
 from inbetweening.utils.aux_functions import plot_3d_skeleton_with_lines, plot_root
 from inbetweening.data_processing.utils import compute_global_positions_in_a_sample
 from inbetweening.utils.convert_to_bvh import write_bvh
+import pymotion.rotations.ortho6d as sixd
 
-path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_scaling/version_0/checkpoints/epoch=8392-step=511973.ckpt'
-config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_scaling/version_0/config.yaml'
+path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_11/checkpoints/epoch=22779-step=1389580.ckpt'
+config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_11/config.yaml'
 
 # Load the config file
 with open(config_file_corresponding_to_ckpt, 'r') as f:
@@ -21,7 +23,7 @@ beta_start = config['model']['beta_start']
 beta_end = config['model']['beta_end']
 n_diffusion_timesteps = config['model']['n_diffusion_timesteps']
 lr = config['model']['lr']
-gap_size = config['model']['gap_size']
+gap_size = 15
 type_masking = config['model']['type_masking']
 time_emb_dim = config['model']['time_emb_dim']
 window = config['model']['window']
@@ -30,7 +32,8 @@ down_channels = config['model']['down_channels']
 type_model = config['model']['type_model']
 kernel_size = config['model']['kernel_size']
 offset = config['data']['offset']
-scaling = config['data']['scaling']
+step_threshold = config['model']['step_threshold']
+max_gap_size = config['model']['max_gap_size']
 
 model = DiffusionModel.load_from_checkpoint(
     path_to_checkpoint,
@@ -45,7 +48,9 @@ model = DiffusionModel.load_from_checkpoint(
     n_joints=n_joints,
     down_channels=down_channels,
     type_model=type_model,
-    kernel_size=kernel_size
+    kernel_size=kernel_size,
+    step_threshold=step_threshold, 
+    max_gap_size=max_gap_size
 )
 
 data_module = Lafan1DataModule(
@@ -53,53 +58,38 @@ data_module = Lafan1DataModule(
     batch_size=1,
     window=window,
     offset=offset,
-    scaling=scaling
 )
 
 data_module.setup(stage='test')
 
 # Get a single sample from the test dataset
-sample_index = 1  # Adjust this index as needed
+sample_index = 10  # Adjust this index as needed
 test_dataset = data_module.test_dataset
 sample = test_dataset[sample_index]
 sample = {key: value.to(model.device) for key, value in sample.items()}
 
-# ATTENTION! For generating the BVH take into account that the X is local (except the root), and the Q is global.
-denoised_X, denoised_Q = model.generate_samples(sample['X'], sample['Q'])
+# ATTENTION! The Q is global.
+denoised_Q, masked_frames = model.generate_samples(sample['X'], sample['Q'])
 
-print("NORMALIZED SCALED ORIGINAL SAMPLE X: ", sample['X'][22:27,0,:])
-print("NORMALIZED SCALED DENOISED SAMPLE X: ", denoised_X[22:27,0,:])
-
-# Undo the scaling
-denoised_X = denoised_X/scaling
-
-# Convert mean_X and std_X from NumPy arrays to PyTorch tensors
-mean_X = torch.tensor(test_dataset.training_mean_X, dtype=torch.float32).to(model.device)
-std_X = torch.tensor(test_dataset.training_std_X, dtype=torch.float32).to(model.device)
-
-# Undo the normalization on denoised_X (back to the original scale)
-denoised_X_original = denoised_X * std_X + mean_X
-
-# Undo the scaling and normalization on the sample data as well
-sample_X_original = sample['X']/scaling * std_X + mean_X
+print(masked_frames)
 
 print('Inbetweening finished!')
-print("ORIGINAL SAMPLE X: ", sample_X_original[22:27,0,:])
-print("DENOISED SAMPLE X: ", denoised_X_original[22:27,0,:])
 
-print("ORIGINAL SAMPLE Q: ", sample['Q'][22:27,0,:])
-print("DENOISED SAMPLE Q: ", denoised_Q[22:27,0,:])
+print("ORIGINAL SAMPLE Q: ", sample['Q'][masked_frames,0,:])
+print("DENOISED SAMPLE Q: ", denoised_Q[masked_frames,0,:])
 
-# Plot the 3D skeleton
-X_gt_global = compute_global_positions_in_a_sample(sample_X_original, sample['Q'], sample['parents'])
-X_denoised_global = compute_global_positions_in_a_sample(denoised_X, denoised_Q, sample['parents'])
-# plot_3d_skeleton_with_lines(torch.tensor(X_gt_global).unsqueeze(0), sample['parents'], sequence_index=0, frames_range=(24, 25))
-# plot_3d_skeleton_with_lines(torch.tensor(X_denoised_global).unsqueeze(0), sample['parents'], sequence_index=0, frames_range=(24, 25))
+# Pass from Ortho6D to quaternions
+original_Q_quat = sample['Q'].reshape(sample['Q'].shape[0], sample['Q'].shape[1], 3, 2) # Shape (frames, joints, 6) --> Shape (frames, joints, 3, 2)
+original_Q_quat = sixd.to_quat(original_Q_quat.cpu().numpy())  # Convert to NumPy for sixd
 
-# Plot the root's path
-# plot_root(sample_X_original.unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
-# plot_root(denoised_X_original.unsqueeze(0)[:, :, 0, :].detach().numpy(), start_frame=0, end_frame=49, sequence_index=0)
+denoised_Q_quat = denoised_Q.reshape(denoised_Q.shape[0], denoised_Q.shape[1], 3, 2)
+denoised_Q_quat = sixd.to_quat(denoised_Q_quat.cpu().numpy())  # Convert to NumPy for sixd
+
+# Convert back to PyTorch tensors
+original_Q_quat = torch.tensor(original_Q_quat, device=sample['X'].device)
+denoised_Q_quat = torch.tensor(denoised_Q_quat, device=sample['X'].device)
+
 
 # Generate BVH files
-write_bvh('output_original.bvh', X=sample_X_original, Q_global=sample['Q'], parents=sample['parents'])
-write_bvh('output_denoised.bvh', X=sample_X_original, Q_global=denoised_Q, parents=sample['parents'])
+write_bvh('output9_original.bvh', X=sample['X'], Q_global=original_Q_quat, parents=sample['parents'])
+write_bvh('output9_denoised_15_fr.bvh', X=sample['X'], Q_global=denoised_Q_quat, parents=sample['parents'])

@@ -57,10 +57,25 @@ def interpolate_quaternions(Q, masked_frames):
 
     return Q
 
+def full_interpolation(X, Q, masked_frames):
+    # Q is in Ortho6D, and it is returned in quaternions
+    Q = Q.reshape(Q.shape[0], Q.shape[1], 3, 2).numpy() # Shape (frames, joints, 6) --> Shape (frames, joints, 3, 2)
+    Q = sixd.to_quat(Q)
+    Q = torch.from_numpy(Q).float()
+    
+    # write_bvh('output_walk_gt2.bvh', sample_X_original, sample['parents'], Q_global=Q)
+
+    X[masked_frames, 0, :] = 0
+    Q[masked_frames, :, :] = 0
+    interpolated_X = interpolate_position(sample_X_original, masked_frames)
+    interpolated_Q = interpolate_quaternions(Q, masked_frames)
+
+    return interpolated_X, interpolated_Q
+
 
 if __name__ == "__main__":
     bvh_path = "../../data"  # Update this with the actual path
-    dataset = Lafan1Dataset(bvh_path, window=50, offset=20, train=True, scaling=1)
+    dataset = Lafan1Dataset(bvh_path, window=50, offset=20, train=True)
 
     # Test by retrieving a sample from the dataset
     sample_idx = 25  # Test with the first sample

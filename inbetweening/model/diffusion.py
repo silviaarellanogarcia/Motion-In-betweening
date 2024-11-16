@@ -39,7 +39,7 @@ def get_index_from_list(vals, t, x_shape):
 
 
 class DiffusionModel(pl.LightningModule):
-    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str, kernel_size: int):
+    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str, kernel_size: int, step_threshold: int, max_gap_size: int):
         super().__init__() # Initialize the parent's class before initializing any child
 
         # Get beta scheduler
@@ -70,10 +70,9 @@ class DiffusionModel(pl.LightningModule):
 
         self.gap_size = gap_size
         self.type_masking = type_masking
-
-        ## USEFUL FOR FINDING IF IT WORKS CORRECTLY, BUT ERASE LATER (TODO: DELETE)
-        # self.FIXED_NOISE_X = torch.randn((256, window, n_joints, 3))
-        # self.FIXED_NOISE_Q = torch.randn((256, window, n_joints, 4))
+        self.step_threshold = step_threshold
+        self.max_gap_size = max_gap_size
+        self.steps_since_last_gap_increase = 0  # Counter for steps since last gap increase
     
     def masking(self, n_frames, gap_size, type='continued'):
         """
@@ -81,7 +80,7 @@ class DiffusionModel(pl.LightningModule):
         Type can be 'continued' (the masked frames are one after the other) or 'spread' (the masked frames are placed randdomly on the sequence, except first and last position).
         """
         ## Shape of X: batch_size, frames, joints, position_dims
-        ## Shape of Q: batch_size, frames, joints, quaternnion_dims
+        ## Shape of Q: batch_size, frames, joints, angle_dims
 
         masked_frames = []
 
@@ -102,135 +101,102 @@ class DiffusionModel(pl.LightningModule):
         return masked_frames
 
 
-    def forward_diffusion_sample(self, X_0, Q_0, t, masked_frames):
+    def forward_diffusion_sample(self, Q_0, t, masked_frames):
         """ 
         Takes a motion sequence and a timestep as input and returns the noisy version of it
         Important! It should only apply noise to the masked frames.
         """ 
-        ## Apply noise to position --> It only needs to be applied on the root, not the offsets.
-        noise_X = torch.randn_like(X_0)
-        # noise_X = self.FIXED_NOISE_X.cuda() ## TODO: Delete this when I finish debugging
-        sqrt_alphas_cumprod_t_X = get_index_from_list(self.sqrt_alphas_cumprod, t, X_0.shape)  ## Alpha with an overline in the notation
-        sqrt_one_minus_alphas_cumprod_t_X = get_index_from_list(self.sqrt_one_minus_alphas_cumprod, t, X_0.shape)
-
-        noisy_X_0 = X_0.clone()
-        noisy_X_0[:, masked_frames, 0, :] = (sqrt_alphas_cumprod_t_X.to(self.device) * X_0.to(self.device) + sqrt_one_minus_alphas_cumprod_t_X.to(self.device) * noise_X.to(self.device))[:, masked_frames, 0, :].float()
-
-        ## Apply noise to quaternions
+        ## Apply noise to angles
         noise_Q = torch.randn_like(Q_0)
-        # noise_Q = self.FIXED_NOISE_Q.cuda() ## TODO: Delete this when I finish debugging
         sqrt_alphas_cumprod_t_Q = get_index_from_list(self.sqrt_alphas_cumprod, t, Q_0.shape) 
         sqrt_one_minus_alphas_cumprod_t_Q = get_index_from_list(self.sqrt_one_minus_alphas_cumprod, t, Q_0.shape)
 
         noisy_Q_0 = Q_0.clone()
         noisy_Q_0[:, masked_frames, :, :] = (sqrt_alphas_cumprod_t_Q.to(self.device) * Q_0.to(self.device) + sqrt_one_minus_alphas_cumprod_t_Q.to(self.device) * noise_Q.to(self.device))[:, masked_frames, :, :].float()
         
-        return noisy_X_0, noisy_Q_0, noise_X, noise_Q
+        return noisy_Q_0, noise_Q
     
-    def sample_timestep(self, noisy_X, noisy_Q, t):
+    def sample_timestep(self, X_0, noisy_Q, t):
         """
         Calls the model to predict the noise in the motion sequence and returns the denoised image. 
         Applies noise to this motion sequence, if we are not in the last step yet.
         """
-        betas_t = get_index_from_list(self.betas, t, noisy_X.shape)
-        sqrt_one_minus_alphas_cumprod_t = get_index_from_list(self.sqrt_one_minus_alphas_cumprod, t, noisy_X.shape)
-        sqrt_recip_alphas_t = get_index_from_list(self.sqrt_recip_alphas, t, noisy_X.shape)
+        betas_t = get_index_from_list(self.betas, t, noisy_Q.shape)
+        sqrt_one_minus_alphas_cumprod_t = get_index_from_list(self.sqrt_one_minus_alphas_cumprod, t, noisy_Q.shape)
+        sqrt_recip_alphas_t = get_index_from_list(self.sqrt_recip_alphas, t, noisy_Q.shape)
 
-        noise_pred = self.model(noisy_X, noisy_Q, t) ### I will have X and Q together and I have to separate them.
-        noise_X_pred = noise_pred[:, :(self.n_joints * 3), :]
-        noise_Q_pred = noise_pred[:, (self.n_joints * 3):, :]
-
-        noise_X_pred = torch.permute(noise_X_pred, (0,2,1))
+        noise_Q_pred = self.model(X_0, noisy_Q, t) ### I will have X and Q together and I have to separate them.
         noise_Q_pred = torch.permute(noise_Q_pred, (0,2,1))
 
-        # Convert back to the shape (1, 50, 22, 3) --> TODO: BE CAREFUL!
+        # Convert back to the shape (1, 50, 22, angle_dim) --> TODO: BE CAREFUL!
         batch_size = t.shape[0]
-        noise_X_pred = noise_X_pred.view(batch_size, self.window, self.n_joints, 3)
-        noise_Q_pred = noise_Q_pred.view(batch_size, self.window, self.n_joints, 4)
+        noise_Q_pred = noise_Q_pred.view(batch_size, self.window, self.n_joints, 6)
 
         # Call model (current image - noise prediction)
-        model_mean_X = sqrt_recip_alphas_t * (noisy_X - betas_t * noise_X_pred / sqrt_one_minus_alphas_cumprod_t) ## This corresponds to eq. 11
-        model_mean_Q = sqrt_recip_alphas_t * (noisy_Q - betas_t * noise_Q_pred / sqrt_one_minus_alphas_cumprod_t)
+        model_mean_Q = sqrt_recip_alphas_t * (noisy_Q - betas_t * noise_Q_pred / sqrt_one_minus_alphas_cumprod_t) ## This corresponds to eq. 11
 
-        posterior_variance_t = get_index_from_list(self.posterior_variance, t, noisy_X.shape)
+        posterior_variance_t = get_index_from_list(self.posterior_variance, t, noisy_Q.shape)
         
         if t == 0:
             ## Current model_mean_X and model_mean_Q contain all the frames. In the training step I should only keep the ones that correspond to the gap and 
             ## incorporate these into the complete sequence.
-            return model_mean_X, model_mean_Q
+            return model_mean_Q
         else:
             ## These X and Q minus one contain everything, but I should only keep the part that corresponds to the gap, and concatenate that to the original motion.
-            X_minus_one = model_mean_X + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_X) ## Equation 4 in algorihm 2
             Q_minus_one = model_mean_Q + torch.sqrt(posterior_variance_t) * torch.randn_like(model_mean_Q) 
-            ### TODO: Maybe it's better to predict the clean motion instead of the noise (predict x_{0} directly, not x_{t-1})
-
-            return X_minus_one, Q_minus_one
+            return Q_minus_one
     
     
     def get_loss(self, model, X_0, Q_0, t, masked_frames):
         """
         Compute the loss between the predicted noise and the actual noise for both positions (X_0) and quaternions (Q_0).
         """
-        noisy_X_0, noisy_Q_0, noise_X, noise_Q = self.forward_diffusion_sample(X_0, Q_0, t, masked_frames)
+        noisy_Q_0, noise_Q = self.forward_diffusion_sample(Q_0, t, masked_frames)
         
         # Predict noise for both positional and quaternion data
-        noise_pred = model(noisy_X_0, noisy_Q_0, t)
+
+        noise_pred = model(X_0, noisy_Q_0, t)
 
         # Reshape the noise so that it has the same structure as the noise prediction.
-        batch_size, frames, joints, position_dims = noise_X.shape
-        noise_X = noise_X.view(batch_size, frames, joints * position_dims)
-
-        batch_size, frames, joints, quaternion_dims = noise_Q.shape
-        noise_Q = noise_Q.view(batch_size, frames, joints * quaternion_dims)
-
-        # Concatenate the channels dimensions to consider X and Q at the same time
-        noise_X_and_Q = torch.cat((noise_X, noise_Q), dim=2)
-        noise_X_and_Q = torch.permute(noise_X_and_Q, (0,2,1))
+        batch_size, frames, joints, angle_dims = noise_Q.shape
+        noise_Q = noise_Q.view(batch_size, frames, joints * angle_dims)
+        noise_Q = torch.permute(noise_Q, (0,2,1))
         
         # Create a tensor for the masked frames
         masked_frames_tensor = torch.tensor(masked_frames).view(-1, 1)
         masked_frames_tensor = masked_frames_tensor.view(-1)
 
         # Calculate the loss
-        loss_X = F.mse_loss(noise_X_and_Q[:, :(joints * 3), masked_frames_tensor], noise_pred[:, :(joints * 3), masked_frames_tensor], reduction='sum')
-        loss_Q = F.mse_loss(noise_X_and_Q[:, (joints * 3):, masked_frames_tensor], noise_pred[:, (joints * 3):, masked_frames_tensor], reduction='sum')
+        loss_Q = F.mse_loss(noise_Q[:, :, masked_frames_tensor], noise_pred[:, :, masked_frames_tensor], reduction='sum')
         
-        return loss_X, loss_Q
+        return loss_Q
     
     def training_step(self, batch, batch_idx):
-        if self.global_step % 8000 == 0: # TODO: Change 5 with a parameter that indicates the maximum gap
-            # Increase gap_size by a fixed amount, e.g., increase by 1 for every 20,000 steps
-            self.gap_size = min(self.gap_size + 1, 5) # TODO: Change 5 with a parameter that indicates the maximum gap
+        if self.steps_since_last_gap_increase >= self.step_threshold:  # TODO: Change 5 with a parameter indicating the maximum gap
+            self.gap_size = min(self.gap_size + 1, self.max_gap_size)  # TODO: Adjust maximum gap parameter
+            self.step_threshold += 5000
+            self.steps_since_last_gap_increase = 0
 
-        # Batch processing
-        ### Real data, named "X" in the paper
         X_0 = batch['X']
         Q_0 = batch['Q']
+
         t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
-
-        # Masking
-        masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
-
-        ## Compute "X - X_ref"
-        if 0 in masked_frames:
-            raise AssertionError("Frame 0 is in masked frames!")
-        
-        X_input = X_0 - X_0[:, masked_frames[0] - 1, :, :].unsqueeze(1)
-        Q_input = Q_0 - Q_0[:, masked_frames[0] - 1, :, :].unsqueeze(1)
-
+        masked_frames = self.masking(n_frames=Q_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
         # Calculate loss
-        loss_X, loss_Q = self.get_loss(self.model, X_input, Q_input, t, masked_frames)
-        total_loss = ((1/X_0.shape[2] * loss_X) + loss_Q) / X_0.shape[0]
+        loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)
+        total_loss = loss_Q / Q_0.shape[0]
         
-        # Log loss
-        self.log('train_loss_X', loss_X/X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
-        self.log('train_loss_Q', loss_Q/X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
+        # Log both step and epoch loss
         self.log('train_total_loss', total_loss, prog_bar=True, on_step=True)
 
-        optimizer = self.optimizers()  # Use `self.optimizers()` in Lightning to get the optimizer
+        optimizer = self.optimizers()
         current_lr = optimizer.param_groups[0]['lr']
-        self.log('learning_rate', current_lr, prog_bar=True, on_step=True, on_epoch=True)
+        self.log('learning_rate', current_lr, prog_bar=True, on_step=True)
+        self.log('gap_size', self.gap_size, prog_bar=True, on_step=True)
+
+        # Update the step counter
+        self.steps_since_last_gap_increase += 1
 
         return total_loss
     
@@ -241,81 +207,60 @@ class DiffusionModel(pl.LightningModule):
         t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
 
         # Masking
-        masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
+        masked_frames = self.masking(n_frames=Q_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
-        ## Compute "X - X_ref"
-        if 0 in masked_frames:
-            raise AssertionError("Frame 0 is in masked frames!")
-        
-        X_input = X_0 - X_0[:, masked_frames[0] - 1, :, :].unsqueeze(1)
-        Q_input = Q_0 - Q_0[:, masked_frames[0] - 1, :, :].unsqueeze(1)
+        # Q_input = Q_0 - Q_0[:, masked_frames[0] - 1, :, :].unsqueeze(1) ## TODO: TRY THIS THING LATER, NOW JUST PREDICT THE Q
 
         # Calculate loss
-        loss_X, loss_Q = self.get_loss(self.model, X_input, Q_input, t, masked_frames)
-        total_loss = ((1/X_input.shape[2] * loss_X) + loss_Q) / X_input.shape[0]
+        loss_Q = self.get_loss(self.model, X_0, Q_0, t, masked_frames)
+        total_loss = (loss_Q) / Q_0.shape[0]
         
         # Log loss
-        self.log('validation_loss_X', loss_X / X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
-        self.log('validation_loss_Q', loss_Q / X_0.shape[0], prog_bar=True, on_step=True) # We divide the loss by the batch size
-        self.log('validation_total_loss', total_loss, prog_bar=True, on_step=True)
+        self.log('validation_total_loss', total_loss, prog_bar=True, on_step=True) # We divide the loss by the batch size
 
         return total_loss
     
     def generate_samples(self, X_0, Q_0):
         self.eval()
         with torch.no_grad():
-            X_0 = X_0.unsqueeze(0) ## This adds the batch dimension
+            X_0 = X_0.unsqueeze(0)
             Q_0 = Q_0.unsqueeze(0) ## This adds the batch dimension
 
-            t = torch.full((X_0.shape[0],), self.n_diffusion_timesteps - 1, device=self.device).long()
+            t = torch.full((Q_0.shape[0],), self.n_diffusion_timesteps - 1, device=self.device).long()
 
             # Masking
-            masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
-
-            ## Compute "X - X_ref"
-            if 0 in masked_frames:
-                raise AssertionError("Frame 0 is in masked frames!")
-            
-            X_input = X_0 - X_0[masked_frames[0] - 1, :, :] ## TODO: Check if the shape is (1, X, X, X) or (X, X, X)
-            Q_input = Q_0 - X_0[masked_frames[0] - 1, :, :]
+            masked_frames = self.masking(n_frames=Q_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
             # Calculate loss
-            noisy_X_0, noisy_Q_0, _, _ = self.forward_diffusion_sample(X_input, Q_input, t, masked_frames)
+            noisy_Q_0, _ = self.forward_diffusion_sample(Q_0, t, masked_frames)
 
             for step in reversed(range(self.n_diffusion_timesteps)):
                 t_step = torch.tensor([step], device=self.device).long()
 
-                # Denoise positions and quaternions
-                denoised_X_complete_seq, denoised_Q_complete_seq = self.sample_timestep(noisy_X_0, noisy_Q_0, t_step)
-                noisy_X_0[:, masked_frames, :, :] = denoised_X_complete_seq[:, masked_frames, :, :].float()
+                # Denoise positions and angles
+                denoised_Q_complete_seq = self.sample_timestep(X_0, noisy_Q_0, t_step)
                 noisy_Q_0[:, masked_frames, :, :] = denoised_Q_complete_seq[:, masked_frames, :, :].float()
 
-                # Normalize quaternions to ensure they remain valid unit quaternions
-                # noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1)
-
-            # Normalize the quaternions to ensure they are valid unit quaternions
-            # noisy_Q_0 = F.normalize(noisy_Q_0, dim=-1) ## TODO: Check that the samples that weren't modified remain the same
-
-        return noisy_X_0[0], noisy_Q_0[0]
+        return noisy_Q_0[0], masked_frames
 
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
-        # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.9999)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.9999)
 
-        scheduler = {
-            'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, 
-                mode='min',
-                factor=0.3, # Reduce the learning rate by 30%
-                patience=10, # Number of epochs to wait before reducing LR
-                min_lr=1e-6, # Minimum learning rate to avoid reducing too much
-                verbose=True
-            ),
-            'monitor': 'train_total_loss', # The metric to monitor; ensure 'val_loss' is logged in validation_step
-            'interval': 'epoch',   # Check at the end of every epoch
-            'frequency': 1         # Check after every epoch
-        }
+        # scheduler = {
+        #     'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(
+        #         optimizer, 
+        #         mode='min',
+        #         factor=0.3, # Reduce the learning rate by 30%
+        #         patience=10, # Number of epochs to wait before reducing LR
+        #         min_lr=1e-6, # Minimum learning rate to avoid reducing too much
+        #         verbose=True
+        #     ),
+        #     'monitor': 'train_total_loss', # The metric to monitor; ensure 'val_loss' is logged in validation_step
+        #     'interval': 'epoch',   # Check at the end of every epoch
+        #     'frequency': 1         # Check after every epoch
+        # }
 
         return [optimizer], [scheduler]
 
@@ -326,15 +271,16 @@ if __name__ == "__main__":
         'class_path': 'pytorch_lightning.loggers.TensorBoardLogger',
         'init_args': {                      # Use init_args instead of params
             'save_dir': 'lightning_logs',
-            'name': 'my_model_prueba',
+            'name': 'my_model_Q_and_X',
             'version': None
         }
     }
 
     checkpoint_callback = ModelCheckpoint(
-        save_top_k=10,  # Keep 10 checkpoints
-        monitor='validation_total_loss',
-        mode="min"
+        save_top_k=-1,  # Keep all checkpoints
+        monitor='train_total_loss',
+        mode="min",
+        every_n_epochs=20 # Save every 10 epochs
     )
 
     # Use LightningCLI with the updated logger configuration

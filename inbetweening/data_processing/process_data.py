@@ -10,7 +10,7 @@ import pymotion.rotations.ortho6d as sixd
 class Lafan1Dataset(Dataset):
     """LAFAN1 Dataset class."""
 
-    def __init__(self, data_dir: str, window: int, offset: int, scaling: int, train: bool=True, val: bool=False, test: bool=False):
+    def __init__(self, data_dir: str, window: int, offset: int, train: bool=True, val: bool=False, test: bool=False):
         """
         Args:
             data_dir (string): Directory with the dataset.
@@ -30,11 +30,6 @@ class Lafan1Dataset(Dataset):
         self.window = window
         self.offset = offset
 
-        self.scaling = scaling
-
-        self.training_mean_X = None
-        self.training_std_X = None
-
         self.actors_train = ['subject1', 'subject2', 'subject3']
         self.act_num_train = '123'
 
@@ -49,32 +44,9 @@ class Lafan1Dataset(Dataset):
             self.actors = ['subject5']
             act_num = '5'
         
-
         # Load the corresponding data
         filename_data = './pickle_data/lafan1_data_actors_' + act_num + '_win_' + str(self.window) + '_off_' + str(self.offset) + '.pkl'
         self.load_or_create_data_pickle(filename_data)
-
-        # Loadd mean and std
-        filename_stats = './pickle_data/stats.pkl'
-
-        if self.training_mean_X is None or self.training_std_X is None:
-            if os.path.isfile(filename_stats):
-                with open(filename_stats, 'rb') as f:
-                    self.training_mean_X, self.training_std_X = pickle.load(f)
-            else: 
-                filename_train_data = './pickle_data/lafan1_data_actors_' + self.act_num_train + '_win_' + str(self.window) + '_off_' + str(self.offset) + '.pkl'
-                if not os.path.isfile(filename_train_data):
-                    raise FileNotFoundError(f"The training data file {filename_train_data} does not exist!")
-                with open(filename_train_data, 'rb') as f:
-                    train_X, _, _, _, _, _ = pickle.load(f) 
-                # Load training dataset and compute mean and var
-                self.training_mean_X = np.mean(train_X, axis=(0, 1))
-                self.training_std_X = np.std(train_X, axis=(0, 1))
-
-                # Save the stats
-                with open(filename_stats, 'wb') as f:
-                    pickle.dump((self.training_mean_X, self.training_std_X), f)
-
 
     def __len__(self):
         return len(self.X) ## Returns the number of sequences.
@@ -90,13 +62,6 @@ class Lafan1Dataset(Dataset):
         parents = self.parents
         contacts_l = self.contacts_l[idx]
         contacts_r = self.contacts_r[idx]
-
-        assert self.training_mean_X is not None, "Mean X is not set!"
-        assert self.training_std_X is not None, "Standard deviation of X is not set!"
-
-        # Normalize the global position (-1, 1)
-        X = (X - self.training_mean_X) / (self.training_std_X + 1e-8)
-        X = X * self.scaling # TODO: Check this and tune scaling value
 
         # Convert quaternions to Ortho6D
         Q_rotations_tensor = torch.from_numpy(Q)
@@ -129,7 +94,7 @@ class Lafan1Dataset(Dataset):
     
     
 class Lafan1DataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str, batch_size: int, window: int, offset: int, scaling: int):
+    def __init__(self, data_dir: str, batch_size: int, window: int, offset: int):
         """
         Args:
             data_dir (string): Directory with the dataset.
@@ -141,7 +106,6 @@ class Lafan1DataModule(pl.LightningDataModule):
         self.window = window
         self.offset = offset
         self.batch_size = batch_size
-        self.scaling = scaling
 
         # Initialize datasets
         self.train_dataset = None
@@ -177,11 +141,11 @@ class Lafan1DataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         if stage == 'fit' or stage is None:
-            self.train_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, scaling=self.scaling, train=True, val=False, test=False)
-            self.val_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, scaling=self.scaling, train=False, val=True, test=False)
+            self.train_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=True, val=False, test=False)
+            self.val_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=True, test=False)
 
         elif stage == 'test':
-            self.test_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, scaling=self.scaling, train=False, val=False, test=True)
+            self.test_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=False, test=True)
     
 if __name__ == "__main__":
     bvh_path = "/Users/silviaarellanogarcia/Documents/MSc MACHINE LEARNING/Advanced Project/proyecto/data1"  # Update this with the actual path

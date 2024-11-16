@@ -69,12 +69,12 @@ def write_motion(f, X, Q, parents, frame_time):
 def write_bvh(filename, X, parents, Q_global=None, Q_local=None, frame_time=1.0 / 30):
     """Main function to write the BVH file."""
     
-    if Q_global == None and Q_local == None:
+    if Q_global is None and Q_local is None:
         print("You forgot to provide either Q_local or Q_global!")
         return
-    elif Q_local != None:
+    elif Q_local is not None:
         Q = Q_local
-    elif Q_global != None:
+    elif Q_global is not None:
         Q = quat_ik_Q(Q_global.detach().cpu().numpy(), parents.cpu())
 
     with open(filename, 'w') as f:
