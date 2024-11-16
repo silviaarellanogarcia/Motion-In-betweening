@@ -11,8 +11,8 @@ from inbetweening.data_processing.utils import compute_global_positions_in_a_sam
 from inbetweening.utils.convert_to_bvh import write_bvh
 import pymotion.rotations.ortho6d as sixd
 
-path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_8/checkpoints/epoch=8459-step=516060.ckpt'
-config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_8/config.yaml'
+path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_11/checkpoints/epoch=22779-step=1389580.ckpt'
+config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_11/config.yaml'
 
 # Load the config file
 with open(config_file_corresponding_to_ckpt, 'r') as f:
@@ -63,7 +63,7 @@ data_module = Lafan1DataModule(
 data_module.setup(stage='test')
 
 # Get a single sample from the test dataset
-sample_index = 100  # Adjust this index as needed
+sample_index = 10  # Adjust this index as needed
 test_dataset = data_module.test_dataset
 sample = test_dataset[sample_index]
 sample = {key: value.to(model.device) for key, value in sample.items()}
@@ -91,5 +91,5 @@ denoised_Q_quat = torch.tensor(denoised_Q_quat, device=sample['X'].device)
 
 
 # Generate BVH files
-write_bvh('output7_original.bvh', X=sample['X'], Q_global=original_Q_quat, parents=sample['parents'])
-write_bvh('output7_denoised_15_fr.bvh', X=sample['X'], Q_global=denoised_Q_quat, parents=sample['parents'])
+write_bvh('output9_original.bvh', X=sample['X'], Q_global=original_Q_quat, parents=sample['parents'])
+write_bvh('output9_denoised_15_fr.bvh', X=sample['X'], Q_global=denoised_Q_quat, parents=sample['parents'])
