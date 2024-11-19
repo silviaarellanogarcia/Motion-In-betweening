@@ -9,3 +9,4 @@ logs/
 pickle_data
 error_*
 output_*
+*.bvh
