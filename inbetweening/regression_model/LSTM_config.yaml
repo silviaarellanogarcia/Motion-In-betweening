@@ -16,3 +16,4 @@ model:
   n_frames: *window_val
   step_threshold: 8000
   max_gap_size: 31
+  n_layers: 3

@@ -168,6 +168,26 @@ def read_bvh(filename, start=None, end=None, order=None):
 
     return Anim(rotations, positions, offsets, parents, names)
 
+def process_window(start, end, seq_name, anim, X, Q, X_global, Q_global, contacts_l, contacts_r, seq_names):
+    """
+    Process a single sliding window of data and append results to the provided lists.
+
+    :param start: Start index of the window
+    :param end: End index of the window
+    :param seq_name: Name of the sequence
+    :param anim: Animation object containing positions, quaternions, and parents
+    :param X, Q, X_global, Q_global, contacts_l, contacts_r, seq_names: Lists to append the processed data
+    """
+    q, x = utils.quat_fk(anim.quats[start:end], anim.pos[start:end], anim.parents)
+    c_l, c_r = utils.extract_feet_contacts(x, [3, 4], [7, 8], velfactor=0.02)
+    X.append(anim.pos[start:end])
+    Q.append(anim.quats[start:end])
+    X_global.append(q)
+    Q_global.append(x)
+    contacts_l.append(c_l)
+    contacts_r.append(c_r)
+    seq_names.append(seq_name)
+
 def bvh_to_item(bvh_path, window=50, offset=20):
     """
     Extract the same test set as in the article, given the location of the BVH files.
@@ -206,18 +226,12 @@ def bvh_to_item(bvh_path, window=50, offset=20):
         i = 0
         start_idx = global_idx
 
-        while i+window < anim.pos.shape[0]:
-            q, x = utils.quat_fk(anim.quats[i: i+window], anim.pos[i: i+window], anim.parents) ## Returns the orientation and global positions
-            # Extract contacts --> c_l and c_r are 2Dd arrays because the contact is evaluated at 2 different joints (ex. foot and heel)
-            c_l, c_r = utils.extract_feet_contacts(x, [3, 4], [7, 8], velfactor=0.02)
-            X.append(anim.pos[i: i+window])
-            Q.append(anim.quats[i: i+window])
-            X_global.append(q)
-            Q_global.append(x)
-            seq_names.append(seq_name)
-            contacts_l.append(c_l)
-            contacts_r.append(c_r)
+        if window == anim.pos.shape[0]:
+            process_window(0, window, seq_name, anim, X, Q, X_global, Q_global, contacts_l, contacts_r, seq_names)
+            global_idx += 1
 
+        while i+window < anim.pos.shape[0]:
+            process_window(i, i + window, seq_name, anim, X, Q, X_global, Q_global, contacts_l, contacts_r, seq_names)
             i += offset
             global_idx += 1
 

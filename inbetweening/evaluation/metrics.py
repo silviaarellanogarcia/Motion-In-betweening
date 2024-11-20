@@ -22,8 +22,8 @@ def compute_L2Q(Q_gt_global, Q_preds_global, masks):
     Computes Global quaternion loss (L2Q)
 
     Inputs:
-        Q_gt: Array with the local quaternions for each joint in the ground_truth sequences
-        Q_pred: Array with the local quaternions for each joint in the predicted sequences
+        Q_gt: Array with the global quaternions for each joint in the ground_truth sequences
+        Q_pred: Array with the global quaternions for each joint in the predicted sequences
         masks: Array with 1s if that sample was newly generated and 0 if it was kept.
     
     Outputs:
@@ -43,48 +43,6 @@ def compute_L2Q(Q_gt_global, Q_preds_global, masks):
     l2q = l2q/(D*T)
 
     return l2q
-
-# def compute_L2Q(Q_gt_global, Q_preds_global, masks, parents):
-#     """
-#     Computes Global quaternion loss (L2Q) in a vectorized manner.
-
-#     Inputs:
-#         Q_gt_global: Array with the global quaternions for each joint in the ground_truth sequences, shape (D, T, J, 4)
-#         Q_preds_global: Array with the global quaternions for each joint in the predicted sequences, shape (D, T, J, 4)
-#         masks: Array with 1s if that sample was newly generated and 0 if it was kept.
-    
-#     Outputs:
-#         l2q (float): Global quaternion loss
-#     """
-#     D = len(Q_gt_global)  # Number of sequences
-#     T = len(Q_gt_global[0][masks[0] == 1])  # Transition length for frames
-    
-#     # Initialize accumulated loss and count
-#     accumulated = 0.0
-#     count = 0
-
-#     for d in range(D):
-#         # Get the transition frames for ground truth and predictions
-#         Q_gt_transition_frames = Q_gt_global[d][masks[d] == 1]
-#         Q_preds_transition_frames = Q_preds_global[d][masks[d] == 1]
-
-#         # Vectorized computation of L2 distance for all transition frames and joints
-#         # Reshape to (T, J * 4) to flatten the quaternion components per joint
-#         Q_gt_reshaped = Q_gt_transition_frames.reshape(T, -1)  # Flatten to (T, J*4)
-#         Q_preds_reshaped = Q_preds_transition_frames.reshape(T, -1)  # Flatten to (T, J*4)
-
-#         # Compute the L2 norm across all joints and frames, then sum the results
-#         accumulated += np.sqrt(np.sum((Q_gt_reshaped - Q_preds_reshaped) ** 2, axis=-1)).sum() ## DOUBT
-
-#         # Update count with the total number of quaternions processed
-#         count += T * Q_gt_transition_frames.shape[1]  # Number of frames * joints
-
-#     # Compute the average L2Q loss
-#     l2q = accumulated / count
-
-#     return l2q
-
-
 
 # def compute_L2P(X_gt_global, X_preds_global, masks, parents):
 #     """
@@ -216,12 +174,22 @@ def fast_npss(gt_seq, pred_seq):
 
 
 if __name__ == "__main__":
-    gt_path = './example_bvh/output_run_fall_get_up_gt1.bvh'
-    preds_path = './example_bvh/output_run_fall_get_up_int1.bvh'
+    gt_path = './../model/output9_original.bvh'
+    preds_path = './../model/output9_denoised_15_fr.bvh'
 
-    X_gt, Q_gt, X_gt_global, Q_gt_global, parents, _, _, _ = bvh_to_item(gt_path, window=15, offset=15)
-    X_pred, Q_pred, X_pred_global, Q_pred_global, parents, _, _, _ = bvh_to_item(preds_path, window=15, offset=15)
-    mask = np.array([0,0,0,0,0,0,0,0,0,1,1,1,1,1,0])[np.newaxis, :]
+    n_frames = 50
+    offset = 20
+    gap_size = 15
+
+    X_gt, Q_gt, X_gt_global, Q_gt_global, parents, _, _, _ = bvh_to_item(gt_path, window=n_frames, offset=offset)
+    X_pred, Q_pred, X_pred_global, Q_pred_global, parents, _, _, _ = bvh_to_item(preds_path, window=n_frames, offset=offset)
+
+    start_frame = int((n_frames - gap_size) / 2)
+    masked_frames = list(range(start_frame, start_frame + gap_size))
+
+    mask = np.zeros(n_frames, dtype=int)
+    mask[masked_frames] = 1
+    mask = np.expand_dims(mask, axis=0)
 
     if Q_pred.shape[0] < Q_gt.shape[0]: ## Keep only the sequence that has been interpolated
         Q_gt = Q_gt[:Q_pred.shape[0]]

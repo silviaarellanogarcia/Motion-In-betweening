@@ -17,7 +17,7 @@ class StopTrainingOnGapSize(pl.Callback):
             trainer.should_stop = True  # This stops the training process
 
 class MotionLSTM(pl.LightningModule):
-    def __init__(self, hidden_size: int = 128, lr: float = 0.001, gap_size: int = 1, type_masking: str = 'continued', n_frames: int = 50, step_threshold: int = 8000, max_gap_size: int = 15):
+    def __init__(self, hidden_size: int = 128, lr: float = 0.001, gap_size: int = 1, type_masking: str = 'continued', n_frames: int = 50, step_threshold: int = 8000, max_gap_size: int = 15, n_layers: int=2):
         super(MotionLSTM, self).__init__()
         self.learning_rate = lr
         self.gap_size = gap_size
@@ -28,7 +28,7 @@ class MotionLSTM(pl.LightningModule):
         self.step_threshold = step_threshold
 
         # Temporal processing (Shared across root positions and joint rotations)
-        self.temporal_processing = nn.LSTM(input_size=n_frames, hidden_size=hidden_size, num_layers=2, batch_first=True)
+        self.temporal_processing = nn.LSTM(input_size=n_frames, hidden_size=hidden_size, num_layers=n_layers, batch_first=True)
 
         # Final prediction layer (for each joint's 6D rotation in the masked frames)
         self.output_layer = nn.Linear(hidden_size, self.n_frames)
