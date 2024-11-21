@@ -12,9 +12,8 @@ from inbetweening.data_processing.utils import compute_global_positions_in_a_sam
 from inbetweening.utils.convert_to_bvh import write_bvh
 import pymotion.rotations.ortho6d as sixd
 
-#path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_11/checkpoints/epoch=22779-step=1389580.ckpt'
-path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_12/checkpoints/epoch=28119-step=1715320.ckpt'
-config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_12/config.yaml'
+path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/regression_model/lightning_logs/only_UNet/version_1/checkpoints/epoch=13279-step=810080.ckpt'
+config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/regression_model/lightning_logs/only_UNet/version_1/config.yaml'
 
 # Load the config file
 with open(config_file_corresponding_to_ckpt, 'r') as f:
@@ -22,7 +21,7 @@ with open(config_file_corresponding_to_ckpt, 'r') as f:
 
 # Prepare all the hyperparameters that are necessary for the model
 lr = config['model']['lr']
-gap_size = 21
+gap_size = 5
 type_masking = config['model']['type_masking']
 time_emb_dim = config['model']['time_emb_dim']
 window = config['model']['window']
@@ -59,31 +58,12 @@ data_module = Lafan1DataModule(
 data_module.setup(stage='test')
 
 # Get a single sample from the test dataset
-sample_index = 2500  # Adjust this index as needed
+sample_index = 100  # Adjust this index as needed
 test_dataset = data_module.test_dataset
 sample = test_dataset[sample_index]
 sample = {key: value.to(model.device) for key, value in sample.items()}
 
-# ATTENTION! The Q is global.
-model.eval()
-with torch.no_grad():
-    X_0 = sample['X'].unsqueeze(0)
-    Q_0 = sample['Q'].unsqueeze(0) ## This adds the batch dimension
-
-    # Masking
-    masked_frames = model.masking(n_frames=Q_0.shape[1], gap_size=gap_size, type=type_masking)
-    masked_Q = Q_0.clone()
-    masked_Q[:, masked_frames, :, :] = 0.0
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')  # Check GPU availability
-    t = torch.zeros(Q_0.shape[0]).to(device)
-    Q_pred = SimpleUnet(X_0, masked_Q) # The timestep could be removed, since we are generating all at once
-
-    masked_Q[:, masked_frames, :, :] = Q_pred[:, masked_frames, :, :].float()
-
-predicted_Q, masked_frames = masked_Q[0], masked_frames
-
-
+predicted_Q, masked_frames = model.generate_samples(sample['X'], sample['Q'])
 print(masked_frames)
 
 print('Inbetweening finished!')
@@ -104,5 +84,6 @@ predicted_Q_quat = torch.tensor(predicted_Q_quat, device=sample['X'].device)
 
 
 # Generate BVH files
-write_bvh('UNET_original.bvh', X=sample['X'], Q_global=original_Q_quat, parents=sample['parents'])
-write_bvh('UNET_denoised_21_fr.bvh', X=sample['X'], Q_global=predicted_Q_quat, parents=sample['parents'])
+folder = '/proj/diffusion-inbetweening/inbetweening/regression_model/examples_UNet/'
+write_bvh(folder + 'UNET_100_original.bvh', X=sample['X'], Q_global=original_Q_quat, parents=sample['parents'])
+write_bvh(folder +'UNET_100_denoised_5_fr.bvh', X=sample['X'], Q_global=predicted_Q_quat, parents=sample['parents'])

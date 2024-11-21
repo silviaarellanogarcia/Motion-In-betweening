@@ -129,7 +129,7 @@ class UNetModel(pl.LightningModule):
 
         return total_loss
     
-    def generate_samples(self, X_0, Q_0, model):
+    def generate_samples(self, X_0, Q_0):
         self.eval()
         with torch.no_grad():
             X_0 = X_0.unsqueeze(0)
@@ -140,9 +140,13 @@ class UNetModel(pl.LightningModule):
             masked_Q = Q_0.clone()
             masked_Q[:, masked_frames, :, :] = 0.0
 
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')  # Check GPU availability
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             t = torch.zeros(Q_0.shape[0]).to(device)
-            Q_pred = model(X_0, masked_Q) # The timestep could be removed, since we are generating all at once
+            Q_pred = self.model(X_0, masked_Q, t) # The timestep could be removed, since we are generating all at once
+
+            batch_size, joints_and_angles, frames = Q_pred.shape
+            Q_pred = torch.permute(Q_pred, (0,2,1))
+            Q_pred = Q_pred.view(batch_size, frames, self.n_joints, 6)
 
             masked_Q[:, masked_frames, :, :] = Q_pred[:, masked_frames, :, :].float()
 
