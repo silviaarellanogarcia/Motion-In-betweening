@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from inbetweening.data_processing.process_data import Lafan1Dataset
+from inbetweening.data_processing.process_data import Lafan1DataModule, Lafan1Dataset
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 import pymotion.rotations.ortho6d as sixd
@@ -57,18 +57,30 @@ def interpolate_quaternions(Q, masked_frames):
 
     return Q
 
-def full_interpolation(X, Q, masked_frames):
-    # Q is in Ortho6D, and it is returned in quaternions
-    Q = Q.reshape(Q.shape[0], Q.shape[1], 3, 2).numpy() # Shape (frames, joints, 6) --> Shape (frames, joints, 3, 2)
-    Q = sixd.to_quat(Q)
+def full_interpolation(sample, masked_frames, path_interpolated_bvh, path_gt_bvh = None, interpolate_X_and_Q = True):
+    '''
+    Interpolate rotations and positions. The input rotation is in Ortho6D, but it is converted to quaternions, and then interpolated.
+    If interpolate_X_and_Q is False, it only interpolates Q, and uses the real X.
+    '''
+    X = sample['X']
+    Q = sample['Q'].reshape(sample['Q'].shape[0], sample['Q'].shape[1], 3, 2) # Shape (frames, joints, 6)
+    Q = Q.numpy()
+    Q = sixd.to_quat(Q) # Shape (frames, joints, 3, 2)
     Q = torch.from_numpy(Q).float()
     
-    # write_bvh('output_walk_gt2.bvh', sample_X_original, sample['parents'], Q_global=Q)
+    if path_gt_bvh is not None:
+        write_bvh(path_gt_bvh, X, sample['parents'], Q_global=Q)
 
-    X[masked_frames, 0, :] = 0
     Q[masked_frames, :, :] = 0
-    interpolated_X = interpolate_position(sample_X_original, masked_frames)
     interpolated_Q = interpolate_quaternions(Q, masked_frames)
+
+    if interpolate_X_and_Q:
+        X[masked_frames, 0, :] = 0
+        interpolated_X = interpolate_position(X, masked_frames)
+        write_bvh(path_interpolated_bvh, interpolated_X, sample['parents'], Q_global=interpolated_Q)
+    else:
+        interpolated_X = None
+        write_bvh(path_interpolated_bvh, X, sample['parents'], Q_global=interpolated_Q)
 
     return interpolated_X, interpolated_Q
 
@@ -76,27 +88,33 @@ def full_interpolation(X, Q, masked_frames):
 if __name__ == "__main__":
     bvh_path = "../../data"  # Update this with the actual path
     dataset = Lafan1Dataset(bvh_path, window=50, offset=20, train=True)
+    gap_size = 15
+    window = 50
+    offset = 20
 
     # Test by retrieving a sample from the dataset
-    sample_idx = 25  # Test with the first sample
-    sample = dataset[sample_idx]
+    data_module = Lafan1DataModule(
+        data_dir=bvh_path,
+        batch_size=1,
+        window=window,
+        offset=offset,
+    )
 
-    mean_X = torch.tensor(dataset.training_mean_X, dtype=torch.float32).cpu()
-    std_X = torch.tensor(dataset.training_std_X, dtype=torch.float32).cpu()
-    sample_X_original = sample['X']/1 * std_X + mean_X
+    data_module.setup(stage='test')
 
-    Q = sample['Q'].reshape(sample['Q'].shape[0], sample['Q'].shape[1], 3, 2) # Shape (frames, joints, 6)
-    Q = Q.numpy()
-    Q = sixd.to_quat(Q) # Shape (frames, joints, 3, 2)
-    Q = torch.from_numpy(Q).float()
-    
-    write_bvh('output_walk_gt2.bvh', sample_X_original, sample['parents'], Q_global=Q)
+    sample_index = 10  # Adjust this index as needed
+    test_dataset = data_module.test_dataset
+    sample = test_dataset[sample_index]
+    sample = {key: value.cpu() for key, value in sample.items()}
 
-    masked_frames = [20, 21, 22, 23, 24, 25]
+    n_frames = sample['Q'].shape[0]
+    start_frame = int((n_frames - gap_size) / 2)
+    masked_frames = list(range(start_frame, start_frame + gap_size))
 
-    sample_X_original[masked_frames, 0, :] = 0
-    Q[masked_frames, :, :] = 0
-    interpolated_X = interpolate_position(sample_X_original, masked_frames)
-    interpolated_Q = interpolate_quaternions(Q, masked_frames)
+    mask = np.zeros(n_frames, dtype=int)
+    mask[masked_frames] = 1
 
-    write_bvh('output_walk_int2.bvh', interpolated_X, sample['parents'], Q_global=interpolated_Q)
+    path_interpolated_bvh = 'output_walk_int2.bvh'
+    path_gt_bvh = 'output_walk_gt2.bvh'
+
+    full_interpolation(sample, masked_frames, path_interpolated_bvh, path_gt_bvh, interpolate_X_and_Q=False)
