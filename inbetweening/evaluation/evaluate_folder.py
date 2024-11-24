@@ -19,43 +19,36 @@ def compute_means_by_num_frames(csv_file_path):
 
     return grouped_means
 
-def get_sample_nums(folder_path):
-    sample_nums = set()  # To store unique sample numbers
+def pair_denoised_with_original(folder_path, type_folder):
+    if type_folder == "diffusion":
+        start_str = "diff_output_"
+        generated_str = "denoised"
+    elif type_folder == "interpolation":
+        start_str = "interp_output_"
+        generated_str = "generated"
 
-    # Iterate through all files in the folder
-    for filename in os.listdir(folder_path):
-        if filename.endswith(".bvh"):
-            # Split the filename into parts
-            parts = filename.split('_')
-            if len(parts) > 2 and parts[0] == "diff" and parts[1] == "output":
-                sample_num = parts[2]  # Extract the sample number
-                sample_nums.add(sample_num)
-
-    return sample_nums
-
-def pair_denoised_with_original(folder_path):
     file_dict = {}  # To group files by sample_num
     paired_dict = {}  # To store pairs of denoised and original files
 
     # Iterate through all files in the folder
     for filename in os.listdir(folder_path):
-        if filename.endswith(".bvh") and filename.startswith("diff_output_"):
+        if filename.endswith(".bvh") and filename.startswith(start_str):
             # Split the filename to extract components
             parts = filename.split('_')
             if len(parts) > 2:
                 sample_num = parts[2]  # Extract sample_num
-                file_type = "denoised" if "denoised" in filename else "original"
+                file_type = "generated" if generated_str in filename else "original"
                 
                 # Group files by sample_num
                 if sample_num not in file_dict:
-                    file_dict[sample_num] = {"denoised": [], "original": []}
+                    file_dict[sample_num] = {"generated": [], "original": []}
                 
                 # Append the filename to the correct list
                 file_dict[sample_num][file_type].append(filename)
 
     # Pair denoised and original files
     for sample_num, files in file_dict.items():
-        denoised_files = files.get("denoised", [])
+        denoised_files = files.get("generated", [])
         original_files = files.get("original", [])
         
         # For each denoised file, pair it with an original file (if available)
@@ -66,18 +59,18 @@ def pair_denoised_with_original(folder_path):
     return paired_dict
 
 
-def main(folder_path, n_frames, offset, output_csv_path):
-    pairs = pair_denoised_with_original(folder_path)
+def main(folder_path, n_frames, offset, output_csv_path, type_folder):
+    pairs = pair_denoised_with_original(folder_path, type_folder)
 
     # Prepare results to save
     results = []
 
-    for denoised, original in pairs.items():
+    for generated, original in pairs.items():
         gt_path = os.path.join(folder_path, original)
-        preds_path = os.path.join(folder_path, denoised)
+        preds_path = os.path.join(folder_path, generated)
 
-        num_frames = int(denoised.split('_')[4])  # Extract num_frames from the filename
-        sample_num = denoised.split('_')[2]  # Extract sample_num
+        num_frames = int(generated.split('_')[4])  # Extract num_frames from the filename
+        sample_num = generated.split('_')[2]  # Extract sample_num
 
         X_gt, Q_gt, X_gt_global, Q_gt_global, parents, _, _, _ = bvh_to_item(gt_path, window=n_frames, offset=offset)
         X_pred, Q_pred, X_pred_global, Q_pred_global, parents, _, _, _ = bvh_to_item(preds_path, window=n_frames, offset=offset)
@@ -114,10 +107,12 @@ def main(folder_path, n_frames, offset, output_csv_path):
     print(f"Results saved to {output_csv_path}")
 
 if __name__ == "__main__":
-    folder_path = "/proj/diffusion-inbetweening/inbetweening/model/generated_samples"  # Replace with your folder path
-    output_csv_path = "/proj/diffusion-inbetweening/inbetweening/model/OUTPUT.csv"
+    type_folder = 'interpolation'
+
+    folder_path = "/proj/diffusion-inbetweening/inbetweening/evaluation/generated_interpolation"  # Replace with your folder path
+    output_csv_path = f"/proj/diffusion-inbetweening/inbetweening/model/metrics_{type_folder}.csv"
     n_frames = 50
     offset = 20
 
-    main(folder_path, n_frames, offset, output_csv_path)
+    main(folder_path, n_frames, offset, output_csv_path, type_folder)
     compute_means_by_num_frames(output_csv_path)
