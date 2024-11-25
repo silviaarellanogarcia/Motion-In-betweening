@@ -26,6 +26,12 @@ def pair_denoised_with_original(folder_path, type_folder):
     elif type_folder == "interpolation":
         start_str = "interp_output_"
         generated_str = "generated"
+    elif type_folder == "LSTM":
+        start_str = "LSTM_"
+        generated_str = "generated"
+    elif type_folder == "UNet":
+        start_str = "UNET_"
+        generated_str = "generated"
 
     file_dict = {}  # To group files by sample_num
     paired_dict = {}  # To store pairs of denoised and original files
@@ -50,7 +56,7 @@ def pair_denoised_with_original(folder_path, type_folder):
     for sample_num, files in file_dict.items():
         denoised_files = files.get("generated", [])
         original_files = files.get("original", [])
-        
+
         # For each denoised file, pair it with an original file (if available)
         for denoised_file in denoised_files:
             if original_files:
@@ -107,9 +113,9 @@ def main(folder_path, n_frames, offset, output_csv_path, type_folder):
     print(f"Results saved to {output_csv_path}")
 
 if __name__ == "__main__":
-    type_folder = 'interpolation'
+    type_folder = 'UNet'
 
-    folder_path = "/proj/diffusion-inbetweening/inbetweening/evaluation/generated_interpolation"  # Replace with your folder path
+    folder_path = "/proj/diffusion-inbetweening/inbetweening/regression_model/generated_samples_UNet"  # Replace with your folder path
     output_csv_path = f"/proj/diffusion-inbetweening/inbetweening/model/metrics_{type_folder}.csv"
     n_frames = 50
     offset = 20
