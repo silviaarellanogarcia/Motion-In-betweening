@@ -168,7 +168,7 @@ def fast_npss(gt_seq, pred_seq):
     emd = np.linalg.norm((cdf_pred_power - cdf_gt_power), ord=1, axis=1)
 
     # Weighted EMD
-    power_weighted_emd = np.average(emd, weights=gt_total_power)
+    power_weighted_emd = np.sum(emd * gt_total_power) / np.sum(gt_total_power)
 
     return power_weighted_emd
 
@@ -203,5 +203,5 @@ if __name__ == "__main__":
     l2p = compute_L2P(X_gt_global, X_pred_global, mask)
     print("L2P: ", l2p)
 
-    npss = fast_npss(X_gt, X_pred)
+    npss = fast_npss(Q_gt, Q_pred)
     print("NPSS: ", npss)

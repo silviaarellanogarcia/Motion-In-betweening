@@ -97,7 +97,7 @@ def main(folder_path, n_frames, offset, output_csv_path, type_folder):
 
         l2q = compute_L2Q(Q_gt_global, Q_pred_global, mask)
         l2p = compute_L2P(X_gt_global, X_pred_global, mask)
-        npss = fast_npss(X_gt, X_pred)
+        npss = fast_npss(Q_gt_global, Q_pred_global)
 
         print(f"Sample: {sample_num}, Frames: {num_frames}, L2Q: {l2q}, L2P: {l2p}, NPSS: {npss}")
 
@@ -113,9 +113,9 @@ def main(folder_path, n_frames, offset, output_csv_path, type_folder):
     print(f"Results saved to {output_csv_path}")
 
 if __name__ == "__main__":
-    type_folder = 'UNet'
+    type_folder = 'diffusion'
 
-    folder_path = "/proj/diffusion-inbetweening/inbetweening/regression_model/generated_samples_UNet"  # Replace with your folder path
+    folder_path = "/proj/diffusion-inbetweening/inbetweening/model/generated_samples"  # Replace with your folder path
     output_csv_path = f"/proj/diffusion-inbetweening/inbetweening/model/metrics_{type_folder}.csv"
     n_frames = 50
     offset = 20
