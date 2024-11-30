@@ -129,7 +129,7 @@ class DiffusionModel(pl.LightningModule):
         noise_Q_pred = torch.permute(noise_Q_pred, (0,2,1))
 
         # Convert back to the shape (1, 50, 22, angle_dim) --> TODO: BE CAREFUL!
-        batch_size = t.shape[0]
+        batch_size = X_0.shape[0]
         noise_Q_pred = noise_Q_pred.view(batch_size, self.window, self.n_joints, 6)
 
         # Call model (current image - noise prediction)
@@ -223,8 +223,8 @@ class DiffusionModel(pl.LightningModule):
     def generate_samples(self, X_0, Q_0):
         self.eval()
         with torch.no_grad():
-            X_0 = X_0.unsqueeze(0)
-            Q_0 = Q_0.unsqueeze(0) ## This adds the batch dimension
+            # X_0 = X_0.unsqueeze(0)
+            # Q_0 = Q_0.unsqueeze(0) ## This adds the batch dimension
 
             t = torch.full((Q_0.shape[0],), self.n_diffusion_timesteps - 1, device=self.device).long()
 
@@ -241,7 +241,7 @@ class DiffusionModel(pl.LightningModule):
                 denoised_Q_complete_seq = self.sample_timestep(X_0, noisy_Q_0, t_step)
                 noisy_Q_0[:, masked_frames, :, :] = denoised_Q_complete_seq[:, masked_frames, :, :].float()
 
-        return noisy_Q_0[0], masked_frames
+        return noisy_Q_0, masked_frames
 
 
     def configure_optimizers(self):

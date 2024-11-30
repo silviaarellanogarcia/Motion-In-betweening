@@ -144,6 +144,9 @@ class Lafan1DataModule(pl.LightningDataModule):
             self.train_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=True, val=False, test=False)
             self.val_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=True, test=False)
 
+        elif stage == 'validate':
+            self.val_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=True, test=False)
+
         elif stage == 'test':
             self.test_dataset = Lafan1Dataset(self.data_dir, window=self.window, offset=self.offset, train=False, val=False, test=True)
     
