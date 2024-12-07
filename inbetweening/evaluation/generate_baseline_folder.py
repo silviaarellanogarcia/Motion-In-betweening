@@ -4,7 +4,7 @@ from inbetweening.data_processing.process_data import Lafan1DataModule, Lafan1Da
 from inbetweening.evaluation.baseline import full_interpolation
 
 
-def main(folder_path, gap_sizes, window, offset, interpolate_X_and_Q, samples_to_generate=None):
+def main(folder_path, gap_sizes, window, offset, interpolate_X, interpolate_Q, samples_to_generate=None):
     bvh_path = "../../data"  # Update this with the actual path
     
     # Test by retrieving a sample from the dataset
@@ -15,7 +15,7 @@ def main(folder_path, gap_sizes, window, offset, interpolate_X_and_Q, samples_to
         offset=offset,
     )
 
-    data_module.setup(stage='test')
+    data_module.setup(stage='test') ## TODO: CHANGE!
     test_dataset = data_module.test_dataset
 
     if samples_to_generate == None:
@@ -37,13 +37,14 @@ def main(folder_path, gap_sizes, window, offset, interpolate_X_and_Q, samples_to
             path_gt_bvh = folder_path + f'/interp_output_{sample_index}_original.bvh'
             path_interpolated_bvh = folder_path + f'/interp_output_{sample_index}_generated_{gap_size}_fr.bvh'
 
-            full_interpolation(sample, masked_frames, path_interpolated_bvh, path_gt_bvh, interpolate_X_and_Q=interpolate_X_and_Q)
+            full_interpolation(sample, masked_frames, path_interpolated_bvh, path_gt_bvh, interpolate_X = interpolate_X, interpolate_Q = interpolate_Q)
 
 if __name__ == "__main__":
-    folder_path = '/proj/diffusion-inbetweening/inbetweening/evaluation/generated_interpolation_only_Q'
+    folder_path = '/proj/diffusion-inbetweening/inbetweening/evaluation/generated_interpolation_only_X_test_set'
     samples_to_generate = None
     gap_sizes = [5, 10, 15]
     window = 50
     offset = 20
-    interpolate_X_and_Q = False
-    main(folder_path, gap_sizes, window, offset, interpolate_X_and_Q, samples_to_generate)
+    interpolate_X = True
+    interpolate_Q = False
+    main(folder_path, gap_sizes, window, offset, interpolate_X, interpolate_Q, samples_to_generate)

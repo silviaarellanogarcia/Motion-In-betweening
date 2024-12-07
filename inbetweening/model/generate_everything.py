@@ -1,4 +1,5 @@
 import torch
+import tqdm
 import yaml
 
 from inbetweening.data_processing.process_data import Lafan1DataModule
@@ -7,15 +8,14 @@ from inbetweening.position_model.LSTM_model_positions import PositionLSTM
 from inbetweening.utils.convert_to_bvh import write_bvh
 import pymotion.rotations.ortho6d as sixd
 
-samples_to_generate = 10
 gap_sizes = [5, 10, 15]
-save_folder_name = 'generated_everything'
+save_folder_name = 'generated_all_Xv27_Qv1'
 
-path_to_checkpoint_pos = '/proj/diffusion-inbetweening/inbetweening/position_model/lightning_logs/positionLSTM/version_21/checkpoints/epoch=2221-step=135542.ckpt'
-config_file_corresponding_to_ckpt_pos = '/proj/diffusion-inbetweening/inbetweening/position_model/lightning_logs/positionLSTM/version_21/config.yaml'
+path_to_checkpoint_pos = '/proj/diffusion-inbetweening/inbetweening/position_model/lightning_logs/positionLSTM/version_27/checkpoints/epoch=8679-step=529480.ckpt'
+config_file_corresponding_to_ckpt_pos = '/proj/diffusion-inbetweening/inbetweening/position_model/lightning_logs/positionLSTM/version_27/config.yaml'
 
-path_to_checkpoint_rot = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_only_Q/version_0/checkpoints/epoch=11199-step=683200.ckpt'
-config_file_corresponding_to_ckpt_rot = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_only_Q/version_0/config.yaml'
+path_to_checkpoint_rot = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_only_Q/version_1/checkpoints/epoch=15879-step=968680.ckpt'
+config_file_corresponding_to_ckpt_rot = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_only_Q/version_1/config.yaml'
 
 # Load the config file
 with open(config_file_corresponding_to_ckpt_rot, 'r') as f:
@@ -48,16 +48,23 @@ n_layers = config['model']['n_layers']
 lower_limit_gap = config['model']['lower_limit_gap']
 upper_limit_gap = config['model']['upper_limit_gap']
 
+batch_size = 256
 
 data_module = Lafan1DataModule(
         data_dir='/proj/diffusion-inbetweening/data',
-        batch_size=1,
+        batch_size=batch_size,
         window=window,
         offset=offset,
     )
 
 data_module.setup(stage='test')
 test_dataset = data_module.test_dataset
+
+data_module.setup(stage='test')
+test_dataset = data_module.test_dataset
+test_dataloader = data_module.test_dataloader()
+samples_to_generate = len(test_dataset)
+print("Samples to generate: ", samples_to_generate)
 
 for gap_size in gap_sizes:
     print(f"GAP: {gap_size}")
@@ -94,25 +101,20 @@ for gap_size in gap_sizes:
         upper_limit_gap=upper_limit_gap
     )
 
-    for i in range(samples_to_generate):
-        print(f"\t ITERATION: {i}, SAMPLE: {i*50}")
-
+    iterator = tqdm.tqdm(iter(test_dataloader), total=len(test_dataset)//batch_size)
+    for batch_index, sample in enumerate(iterator):
         # Get a single sample from the test dataset
-        sample_index = i * 50  # Adjust this index as needed
-        sample = test_dataset[sample_index]
         sample = {key: value.to(model_rot.device) for key, value in sample.items()}
 
         # ATTENTION! The Q is global.
         denoised_Q, masked_frames = model_rot.generate_samples(sample['Q'])
         predicted_X, masked_frames = model_pos.generate_samples(sample['X'], model_pos)
 
-        print(masked_frames)
-
         # Pass from Ortho6D to quaternions
-        original_Q_quat = sample['Q'].reshape(sample['Q'].shape[0], sample['Q'].shape[1], 3, 2) # Shape (frames, joints, 6) --> Shape (frames, joints, 3, 2)
+        original_Q_quat = sample['Q'].reshape(sample['Q'].shape[0], sample['Q'].shape[1], sample['Q'].shape[2], 3, 2) # Shape (frames, joints, 6) --> Shape (frames, joints, 3, 2)
         original_Q_quat = sixd.to_quat(original_Q_quat.cpu().numpy())  # Convert to NumPy for sixd
 
-        denoised_Q_quat = denoised_Q.reshape(denoised_Q.shape[0], denoised_Q.shape[1], 3, 2)
+        denoised_Q_quat = denoised_Q.reshape(denoised_Q.shape[0], denoised_Q.shape[1], denoised_Q.shape[2], 3, 2)
         denoised_Q_quat = sixd.to_quat(denoised_Q_quat.cpu().numpy())  # Convert to NumPy for sixd
 
         # Convert back to PyTorch tensors
@@ -120,7 +122,11 @@ for gap_size in gap_sizes:
         denoised_Q_quat = torch.tensor(denoised_Q_quat, device=sample['X'].device)
 
         # Generate BVH files
-        if gap_size == gap_sizes[0]:
-            write_bvh(f'./{save_folder_name}/diff_output_{sample_index}_original.bvh', X=sample['X'], Q_global=original_Q_quat, parents=sample['parents'])
+        for sample_index, Q_sample in enumerate(denoised_Q_quat):
+            try:
+                write_bvh(f'./{save_folder_name}/diff_output_{batch_index * batch_size + sample_index}_denoised_{gap_size}_fr.bvh', X=predicted_X[sample_index], Q_global=Q_sample, parents=sample['parents'][0])
 
-        write_bvh(f'./{save_folder_name}/diff_output_{sample_index}_denoised_{gap_size}_fr.bvh', X=predicted_X, Q_global=denoised_Q_quat, parents=sample['parents'])
+                if gap_size == gap_sizes[0]:
+                    write_bvh(f'./{save_folder_name}/diff_output_{batch_index * batch_size + sample_index}_original.bvh', X=sample['X'][sample_index], Q_global=original_Q_quat[sample_index], parents=sample['parents'][0])
+            except:
+                continue

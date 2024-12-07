@@ -39,7 +39,7 @@ def get_index_from_list(vals, t, x_shape):
 
 
 class DiffusionModel(pl.LightningModule):
-    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str, kernel_size: int, step_threshold: int, max_gap_size: int):
+    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str, kernel_size: int, step_threshold: int, max_gap_size: int, lower_limit_gap: int = 1, upper_limit_gap: int = 5):
         super().__init__() # Initialize the parent's class before initializing any child
 
         # Get beta scheduler
@@ -57,6 +57,8 @@ class DiffusionModel(pl.LightningModule):
 
         self.type_model = type_model
         
+        self.lower_limit_gap = lower_limit_gap
+        self.upper_limit_gap = upper_limit_gap
         self.kernel_size = kernel_size
 
         if type_model == 'unet':
@@ -172,10 +174,26 @@ class DiffusionModel(pl.LightningModule):
         return loss_Q
     
     def training_step(self, batch, batch_idx):
-        if self.steps_since_last_gap_increase >= self.step_threshold:  # TODO: Change 5 with a parameter indicating the maximum gap
-            self.gap_size = min(self.gap_size + 1, self.max_gap_size)  # TODO: Adjust maximum gap parameter
-            self.step_threshold += 5000
+        # Increase the gap size in a step manner
+        # if self.steps_since_last_gap_increase >= self.step_threshold:
+        #     self.gap_size = min(self.gap_size + 1, self.max_gap_size)
+        #     self.step_threshold += 5000
+        #     self.steps_since_last_gap_increase = 0
+
+        # Increase the gap size in a sliding window manner
+        if self.steps_since_last_gap_increase >= self.step_threshold:
+            self.lower_limit_gap += 1
+            if self.lower_limit_gap >= 15:
+                self.lower_limit_gap = 15
+
+            self.upper_limit_gap += 1
+            if self.upper_limit_gap > 15:
+                self.upper_limit_gap = 15
+
+            self.step_threshold += 4000
             self.steps_since_last_gap_increase = 0
+
+        self.gap_size = torch.randint(self.lower_limit_gap, self.upper_limit_gap + 1, (1,)).item()
 
         X_0 = batch['X']
         Q_0 = batch['Q']
@@ -204,6 +222,10 @@ class DiffusionModel(pl.LightningModule):
         # Batch processing
         X_0 = batch['X']
         Q_0 = batch['Q']
+
+        # Only when using the sliding window gap size
+        self.gap_size = torch.randint(self.lower_limit_gap, self.upper_limit_gap + 1, (1,)).item()
+
         t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
 
         # Masking
@@ -271,7 +293,7 @@ if __name__ == "__main__":
         'class_path': 'pytorch_lightning.loggers.TensorBoardLogger',
         'init_args': {                      # Use init_args instead of params
             'save_dir': 'lightning_logs',
-            'name': 'my_model_Q_and_X',
+            'name': 'my_model_Q_and_X_longer_gaps',
             'version': None
         }
     }
@@ -289,7 +311,6 @@ if __name__ == "__main__":
                  trainer_defaults={
                      'logger': logger_config,
                      'callbacks': [checkpoint_callback],
-                    #  'overfit_batches': 1 ## TODO: AT SOME POINT REMOVE THE OVERFITTING
     })
 
     ## COMMAND: python diffusion.py fit --config ./config.yaml

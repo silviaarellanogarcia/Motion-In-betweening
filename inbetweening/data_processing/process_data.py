@@ -133,7 +133,7 @@ class Lafan1DataModule(pl.LightningDataModule):
     def test_dataloader(self):
         loader = torch.utils.data.DataLoader(
             dataset=self.test_dataset,
-            batch_size=1,
+            batch_size=self.batch_size,
             shuffle=False
         )
         return loader

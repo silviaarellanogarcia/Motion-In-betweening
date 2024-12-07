@@ -17,10 +17,12 @@ class StopTrainingOnGapSize(pl.Callback):
             trainer.should_stop = True  # This stops the training process
 
 class PositionLSTM(pl.LightningModule):
-    def __init__(self, hidden_size: int = 128, lr: float = 0.001, gap_size: int = 1, type_masking: str = 'continued', n_frames: int = 50, step_threshold: int = 8000, max_gap_size: int = 15, n_layers: int=2):
+    def __init__(self, hidden_size: int = 128, lr: float = 0.001, gap_size: int = 1, type_masking: str = 'continued', n_frames: int = 50, step_threshold: int = 8000, max_gap_size: int = 15, n_layers: int=2, lower_limit_gap: int = 1, upper_limit_gap: int = 5):
         super(PositionLSTM, self).__init__()
         self.learning_rate = lr
         self.gap_size = gap_size
+        self.lower_limit_gap = lower_limit_gap
+        self.upper_limit_gap = upper_limit_gap
         self.max_gap_size = max_gap_size
         self.type_masking = type_masking
         self.n_frames = n_frames
@@ -81,12 +83,24 @@ class PositionLSTM(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         """Perform a training step."""
-        # if self.steps_since_last_gap_increase >= self.step_threshold:  # TODO: Change 5 with a parameter indicating the maximum gap
-        #     self.gap_size = min(self.gap_size + 1, self.max_gap_size)  # TODO: Adjust maximum gap parameter
+        # if self.steps_since_last_gap_increase >= self.step_threshold:
+        #     self.gap_size = min(self.gap_size + 1, self.max_gap_size)
         #     self.step_threshold += 3000
         #     self.steps_since_last_gap_increase = 0
 
-        self.gap_size = torch.randint(1, 6, (1,)).item()
+        if self.steps_since_last_gap_increase >= self.step_threshold:  # TODO: Change 15 with a parameter indicating the maximum gap
+            self.lower_limit_gap += 1
+            if self.lower_limit_gap >= 15:
+                self.lower_limit_gap = 15
+
+            self.upper_limit_gap += 1
+            if self.upper_limit_gap > 15:
+                self.upper_limit_gap = 15
+
+            self.step_threshold += 2000
+            self.steps_since_last_gap_increase = 0
+
+        self.gap_size = torch.randint(self.lower_limit_gap, self.upper_limit_gap + 1, (1,)).item()
         X = batch['X']
 
         # Masking
@@ -112,7 +126,7 @@ class PositionLSTM(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         """Perform a training step."""
         X = batch['X']
-        self.gap_size = torch.randint(1, 6, (1,)).item()
+        self.gap_size = torch.randint(self.lower_limit_gap, self.upper_limit_gap + 1, (1,)).item()
 
         # Masking
         masked_frames = self.masking(n_frames=X.shape[1], gap_size=self.gap_size, type=self.type_masking)
@@ -139,7 +153,7 @@ class PositionLSTM(pl.LightningModule):
     def generate_samples(self, X_0, model):
         self.eval()
         with torch.no_grad():
-            X_0 = X_0.unsqueeze(0)
+            # X_0 = X_0.unsqueeze(0)
 
             masked_frames = self.masking(n_frames=X_0.shape[1], gap_size=self.gap_size, type=self.type_masking)
 
@@ -150,7 +164,7 @@ class PositionLSTM(pl.LightningModule):
             X_pred = model(masked_X) ### I will have X and Q together and I have to separate them.
             masked_X[:, masked_frames, 0, :] = X_pred[:, masked_frames, 0, :].float()
 
-        return masked_X[0], masked_frames
+        return masked_X, masked_frames
 
 
 if __name__ == '__main__':
@@ -165,9 +179,10 @@ if __name__ == '__main__':
     }
 
     checkpoint_callback = ModelCheckpoint(
-        save_top_k=10,  # Keep 10 checkpoints
+        save_top_k=-1,  # Keep 10 checkpoints
         monitor='train_loss',
-        mode="min"
+        mode="min",
+        every_n_epochs=20
     )
 
     stop_training_callback = StopTrainingOnGapSize(gap_size_threshold=30)
@@ -178,7 +193,6 @@ if __name__ == '__main__':
                  trainer_defaults={
                      'logger': logger_config,
                      'callbacks': [checkpoint_callback, stop_training_callback],
-                    #  'overfit_batches': 1 ## TODO: AT SOME POINT REMOVE THE OVERFITTING
     })
 
     ## COMMAND: python LSTM_model.py fit --config ./LSTM_config.yaml

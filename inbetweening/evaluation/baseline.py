@@ -57,7 +57,7 @@ def interpolate_quaternions(Q, masked_frames):
 
     return Q
 
-def full_interpolation(sample, masked_frames, path_interpolated_bvh, path_gt_bvh = None, interpolate_X_and_Q = True):
+def full_interpolation(sample, masked_frames, path_interpolated_bvh, path_gt_bvh = None, interpolate_X = True, interpolate_Q = True):
     '''
     Interpolate rotations and positions. The input rotation is in Ortho6D, but it is converted to quaternions, and then interpolated.
     If interpolate_X_and_Q is False, it only interpolates Q, and uses the real X.
@@ -71,14 +71,19 @@ def full_interpolation(sample, masked_frames, path_interpolated_bvh, path_gt_bvh
     if path_gt_bvh is not None:
         write_bvh(path_gt_bvh, X, sample['parents'], Q_global=Q)
 
+    if interpolate_X and not interpolate_Q:
+        X[masked_frames, 0, :] = 0
+        interpolated_X = interpolate_position(X, masked_frames)
+        write_bvh(path_interpolated_bvh, interpolated_X, sample['parents'], Q_global=Q)
+
     Q[masked_frames, :, :] = 0
     interpolated_Q = interpolate_quaternions(Q, masked_frames)
 
-    if interpolate_X_and_Q:
+    if interpolate_X and interpolate_Q:
         X[masked_frames, 0, :] = 0
         interpolated_X = interpolate_position(X, masked_frames)
         write_bvh(path_interpolated_bvh, interpolated_X, sample['parents'], Q_global=interpolated_Q)
-    else:
+    elif interpolate_Q:
         interpolated_X = None
         write_bvh(path_interpolated_bvh, X, sample['parents'], Q_global=interpolated_Q)
 

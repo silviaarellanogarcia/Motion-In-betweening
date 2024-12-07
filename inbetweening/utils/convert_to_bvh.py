@@ -84,4 +84,4 @@ def write_bvh(filename, X, parents, Q_global=None, Q_local=None, frame_time=1.0 
         # Write the MOTION section
         write_motion(f, X.cpu(), Q, parents.cpu(), frame_time)
 
-    print("BVH saved!")
+    # print("BVH saved!")

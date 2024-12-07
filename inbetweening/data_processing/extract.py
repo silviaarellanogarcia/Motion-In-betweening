@@ -219,7 +219,7 @@ def bvh_to_item(bvh_path, window=50, offset=20):
     if bvh_path.endswith('.bvh'):
         seq_name = ntpath.basename(bvh_path[:-4])
 
-        print('Processing file {}'.format(os.path.basename(bvh_path)))
+        # print('Processing file {}'.format(os.path.basename(bvh_path)))
         anim = read_bvh(bvh_path)
 
         # Sliding windows
@@ -290,7 +290,7 @@ def get_lafan1_set(bvh_path, actors, window=50, offset=20):
             seq_name, subject = ntpath.basename(file[:-4]).split('_')
 
             if subject in actors:
-                print('Processing file {}'.format(file))
+                # print('Processing file {}'.format(file))
                 seq_path = os.path.join(bvh_path, file)
                 anim = read_bvh(seq_path)
 

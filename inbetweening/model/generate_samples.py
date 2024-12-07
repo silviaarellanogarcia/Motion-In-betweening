@@ -5,19 +5,18 @@ import yaml
 import tqdm
 
 from inbetweening.data_processing.process_data import Lafan1DataModule
-from inbetweening.evaluation.baseline import full_interpolation
 from inbetweening.model.diffusion import DiffusionModel
-from inbetweening.utils.aux_functions import plot_3d_skeleton_with_lines, plot_root
-from inbetweening.data_processing.utils import compute_global_positions_in_a_sample
 from inbetweening.utils.convert_to_bvh import write_bvh
 import pymotion.rotations.ortho6d as sixd
 
-gap_sizes = [5]
-save_folder_name = 'generated_samples_fr5_v11'
-# path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_9/checkpoints/epoch=1579-step=96380.ckpt'
-path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_11/checkpoints/epoch=22779-step=1389580.ckpt'
+gap_sizes = [15]
+save_folder_name = 'gen_samples_longer_gaps_v3_Q_with_X'
+# path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_9/checkpoints/epoch=9479-step=578280.ckpt'
+# path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_11/checkpoints/epoch=22779-step=1389580.ckpt'
 # path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X_kernel7/version_0/checkpoints/epoch=18199-step=1110200.ckpt'
-config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_9/config.yaml'
+path_to_checkpoint = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X_longer_gaps/version_3/checkpoints/last.ckpt'
+# config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X/version_9/config.yaml'
+config_file_corresponding_to_ckpt = '/proj/diffusion-inbetweening/inbetweening/model/lightning_logs/my_model_Q_and_X_longer_gaps/version_3/config.yaml'
 
 # Load the config file
 with open(config_file_corresponding_to_ckpt, 'r') as f:
@@ -39,6 +38,9 @@ offset = config['data']['offset']
 step_threshold = config['model']['step_threshold']
 max_gap_size = config['model']['max_gap_size']
 
+lower_limit_gap = config['model']['lower_limit_gap']
+upper_limit_gap = config['model']['upper_limit_gap']
+
 batch_size = 256
 
 data_module = Lafan1DataModule(
@@ -48,10 +50,10 @@ data_module = Lafan1DataModule(
         offset=offset,
     )
 
-data_module.setup(stage='validate')
-test_dataset = data_module.val_dataset ## TODO: CHANGE TO TEST DATASET!!!
-test_dataloader = data_module.val_dataloader() ## TODO: CHANGE TO TEST DATALOADER!!!
-samples_to_generate = len(test_dataset)//3 ## TODO: REMOVE THE 3!!!
+data_module.setup(stage='test')
+test_dataset = data_module.test_dataset ## TODO: CHANGE TO TEST DATASET!!!
+test_dataloader = data_module.test_dataloader() ## TODO: CHANGE TO TEST DATALOADER!!!
+samples_to_generate = len(test_dataset)
 print("Samples to generate: ", samples_to_generate)
 
 for gap_size in gap_sizes:
@@ -72,7 +74,9 @@ for gap_size in gap_sizes:
         type_model=type_model,
         kernel_size=kernel_size,
         step_threshold=step_threshold, 
-        max_gap_size=max_gap_size
+        max_gap_size=max_gap_size,
+        upper_limit_gap=upper_limit_gap,
+        lower_limit_gap=lower_limit_gap
     )
 
     iterator = tqdm.tqdm(iter(test_dataloader), total=len(test_dataset)//batch_size)
@@ -95,10 +99,11 @@ for gap_size in gap_sizes:
         denoised_Q_quat = torch.tensor(denoised_Q_quat, device=sample['X'].device)
 
         # Generate BVH files
-        # if gap_size == gap_sizes[0]:
-            # write_bvh(f'./{save_folder_name}/diff_output_{batch_index * batch_size + sample_index}_original_{gap_size}_fr.bvh', X=sample['X'][sample_index], Q_global=original_Q_quat, parents=sample['parents'][0])
         for sample_index, Q_sample in enumerate(denoised_Q_quat):
             try:
                 write_bvh(f'./{save_folder_name}/diff_output_{batch_index * batch_size + sample_index}_denoised_{gap_size}_fr.bvh', X=sample['X'][sample_index], Q_global=Q_sample, parents=sample['parents'][0])
+
+                if gap_size == gap_sizes[0]:
+                    write_bvh(f'./{save_folder_name}/diff_output_{batch_index * batch_size + sample_index}_original.bvh', X=sample['X'][sample_index], Q_global=original_Q_quat[sample_index], parents=sample['parents'][0])
             except:
                 continue

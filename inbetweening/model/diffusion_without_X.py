@@ -4,14 +4,10 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 import yaml
 
-from inbetweening.data_processing.process_data import Lafan1DataModule, Lafan1Dataset
-from inbetweening.model.mlp import SimpleMLP
+from inbetweening.data_processing.process_data import Lafan1DataModule
 from inbetweening.model.unet import SimpleUnetJustAngles
-from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.cli import LightningCLI
 from pytorch_lightning.callbacks import ModelCheckpoint
-
-# from inbetweening.utils.aux_functions import plot_3d_skeleton_with_lines
 
 def get_scheduler(schedule_name, n_diffusion_timesteps, beta_start, beta_end):
     """
@@ -39,7 +35,7 @@ def get_index_from_list(vals, t, x_shape):
 
 
 class DiffusionModel(pl.LightningModule):
-    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str, kernel_size: int, step_threshold: int, max_gap_size: int):
+    def __init__(self, beta_start: float, beta_end: float, n_diffusion_timesteps: int, lr: float, gap_size: int, type_masking: str, time_emb_dim: int, window: int, n_joints: int, down_channels: list[int], type_model: str, kernel_size: int, step_threshold: int, max_gap_size: int, lower_limit_gap: int = 1, upper_limit_gap: int = 5):
         super().__init__() # Initialize the parent's class before initializing any child
 
         # Get beta scheduler
@@ -69,6 +65,9 @@ class DiffusionModel(pl.LightningModule):
         self.step_threshold = step_threshold
         self.max_gap_size = max_gap_size
         self.steps_since_last_gap_increase = 0  # Counter for steps since last gap increase
+
+        self.lower_limit_gap = lower_limit_gap
+        self.upper_limit_gap = upper_limit_gap
     
     def masking(self, n_frames, gap_size, type='continued'):
         """
@@ -125,7 +124,7 @@ class DiffusionModel(pl.LightningModule):
         noise_Q_pred = torch.permute(noise_Q_pred, (0,2,1))
 
         # Convert back to the shape (1, 50, 22, angle_dim) --> TODO: BE CAREFUL!
-        batch_size = t.shape[0]
+        batch_size = noisy_Q.shape[0]
         noise_Q_pred = noise_Q_pred.view(batch_size, self.window, self.n_joints, 6)
 
         # Call model (current image - noise prediction)
@@ -168,10 +167,24 @@ class DiffusionModel(pl.LightningModule):
         return loss_Q
     
     def training_step(self, batch, batch_idx):
-        if self.steps_since_last_gap_increase >= self.step_threshold:  # TODO: Change 5 with a parameter indicating the maximum gap
-            self.gap_size = min(self.gap_size + 1, self.max_gap_size)  # TODO: Adjust maximum gap parameter
-            self.step_threshold += 5000
+        # if self.steps_since_last_gap_increase >= self.step_threshold:
+        #     self.gap_size = min(self.gap_size + 1, self.max_gap_size)
+        #     self.step_threshold += 5000
+        #     self.steps_since_last_gap_increase = 0
+
+        if self.steps_since_last_gap_increase >= self.step_threshold:
+            self.lower_limit_gap += 1
+            if self.lower_limit_gap >= 15:
+                self.lower_limit_gap = 15
+
+            self.upper_limit_gap += 1
+            if self.upper_limit_gap > 15:
+                self.upper_limit_gap = 15
+
+            self.step_threshold += 4000
             self.steps_since_last_gap_increase = 0
+
+        self.gap_size = torch.randint(self.lower_limit_gap, self.upper_limit_gap + 1, (1,)).item()
 
         Q_0 = batch['Q']
 
@@ -198,6 +211,7 @@ class DiffusionModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         # Batch processing
         Q_0 = batch['Q']
+        self.gap_size = torch.randint(self.lower_limit_gap, self.upper_limit_gap + 1, (1,)).item()
         t = torch.randint(0, self.n_diffusion_timesteps, (Q_0.shape[0],), device=self.device).long()
 
         # Masking
@@ -217,7 +231,7 @@ class DiffusionModel(pl.LightningModule):
     def generate_samples(self, Q_0):
         self.eval()
         with torch.no_grad():
-            Q_0 = Q_0.unsqueeze(0) ## This adds the batch dimension
+            # Q_0 = Q_0.unsqueeze(0) ## This adds the batch dimension
 
             t = torch.full((Q_0.shape[0],), self.n_diffusion_timesteps - 1, device=self.device).long()
 
@@ -234,7 +248,7 @@ class DiffusionModel(pl.LightningModule):
                 denoised_Q_complete_seq = self.sample_timestep(noisy_Q_0, t_step)
                 noisy_Q_0[:, masked_frames, :, :] = denoised_Q_complete_seq[:, masked_frames, :, :].float()
 
-        return noisy_Q_0[0], masked_frames
+        return noisy_Q_0, masked_frames
 
 
     def configure_optimizers(self):
@@ -282,7 +296,6 @@ if __name__ == "__main__":
                  trainer_defaults={
                      'logger': logger_config,
                      'callbacks': [checkpoint_callback],
-                    #  'overfit_batches': 1 ## TODO: AT SOME POINT REMOVE THE OVERFITTING
     })
 
     ## COMMAND: python diffusion.py fit --config ./config.yaml
